@@ -1,4 +1,4 @@
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -11,8 +11,18 @@ async fn main() -> anyhow::Result<()> {
         let (mut socket, _) = listener.accept().await?;
 
         tokio::spawn(async move {
-            // In a loop, read data from the socket and write the data back.
-            let _ = socket.write_all(b"+PONG\r\n").await;
+            let mut buf = [0; 1024];
+            loop {
+                match socket.read(&mut buf).await {
+                    Ok(_) => {
+                        let _ = socket.write_all(b"+PONG\r\n").await;
+                    }
+                    Err(e) => {
+                        eprintln!("failed to read from socket; err = {:?}", e);
+                        return;
+                    }
+                };
+            }
         });
     }
 }
