@@ -1,5 +1,5 @@
 // Uncomment this block to pass the first stage
-use std::{io::Write, net::TcpListener};
+use std::{io::Write, net::TcpListener, thread};
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -11,7 +11,7 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 println!("accepted new connection");
-                stream.write_all(b"+PONG\r\n").unwrap()
+                thread::spawn(move || stream.write_all(b"+PONG\r\n").unwrap());
             }
             Err(e) => {
                 println!("error: {}", e);
