@@ -1,7 +1,20 @@
+use std::ops::Deref;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct BulkString {
     pub length: usize,
-    pub data: String,
+    pub data: SimpleString,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SimpleString(String);
+
+impl Deref for SimpleString {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,6 +63,18 @@ impl TryFrom<&str> for Command {
     }
 }
 
+impl From<&str> for SimpleString {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl SimpleString {
+    fn decode(&self) -> String {
+        format!("{}\r\n", self.0)
+    }
+}
+
 impl BulkString {
     pub fn parse(value: &str) -> anyhow::Result<Self> {
         let values = value.split_terminator("\r\n").collect::<Vec<&str>>();
@@ -64,7 +89,7 @@ impl BulkString {
     }
 
     pub fn decode(&self) -> String {
-        format!("${}\r\n{}\r\n", self.length, self.data)
+        format!("${}\r\n{}", self.length, self.data.decode())
     }
 }
 
@@ -98,7 +123,7 @@ mod tests {
         let result = BulkString::parse("3\r\nhey\r\n");
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.data, "hey");
+        assert_eq!(result.data, "hey".into());
         assert_eq!(result.length, 3);
     }
 
@@ -107,7 +132,7 @@ mod tests {
         let result = BulkString::parse("17\r\nheyhellohowareyou\r\n");
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.data, "heyhellohowareyou");
+        assert_eq!(result.data, "heyhellohowareyou".into());
         assert_eq!(result.length, 17);
     }
 
@@ -116,7 +141,7 @@ mod tests {
         let result = BulkString::parse("0\r\n\r\n");
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.data, "");
+        assert_eq!(result.data, "".into());
         assert_eq!(result.length, 0);
     }
 
@@ -124,7 +149,7 @@ mod tests {
     fn decode_bulk_string() {
         let input_string = "3\r\nhey\r\n";
         let result = BulkString::parse(input_string).unwrap();
-        assert_eq!(result.data, "hey");
+        assert_eq!(result.data, "hey".into());
         assert_eq!(result.length, 3);
         assert_eq!(result.decode(), format!("${input_string}"));
     }
