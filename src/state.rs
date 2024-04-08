@@ -43,3 +43,27 @@ impl Default for State {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_get_not_found_get() {
+        let mut state = State::new();
+        let result = state.handle_response("*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "$-1\r\n".to_owned())
+    }
+
+    #[test]
+    fn test_set_and_get() {
+        let mut state = State::new();
+        let result = state.handle_response("*3\r\n$3\r\nset\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "+OK\r\n".to_owned());
+        let result = state.handle_response("*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result, "$3\r\nbar\r\n")
+    }
+}
