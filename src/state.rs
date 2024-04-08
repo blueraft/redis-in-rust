@@ -3,11 +3,17 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::resp::{BulkString, RedisData};
+use crate::resp::{BulkString, RedisData, SetConfig};
+
+#[derive(Debug)]
+struct HashValue {
+    value: BulkString,
+    config: SetConfig,
+}
 
 #[derive(Debug, Clone)]
 pub struct State {
-    map: Arc<Mutex<HashMap<BulkString, BulkString>>>,
+    map: Arc<Mutex<HashMap<BulkString, HashValue>>>,
 }
 
 impl State {
@@ -20,15 +26,21 @@ impl State {
         let redis_data = RedisData::parse(request)?;
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),
-            RedisData::Set(key, value) => {
+            RedisData::Set(key, value, config) => {
                 let mut map = self.map.lock().unwrap();
-                map.insert(key, value);
+                map.insert(key, HashValue { value, config });
                 "+OK\r\n".to_owned()
             }
             RedisData::Get(key) => {
-                let map = self.map.lock().unwrap();
+                let mut map = self.map.lock().unwrap();
                 match map.get(&key) {
-                    Some(value) => value.decode(),
+                    Some(hash_value) => match hash_value.config.has_expired() {
+                        true => {
+                            map.remove(&key);
+                            "$-1\r\n".to_owned()
+                        }
+                        false => hash_value.value.decode(),
+                    },
                     None => "$-1\r\n".to_owned(),
                 }
             }

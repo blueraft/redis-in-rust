@@ -1,12 +1,15 @@
-use std::ops::Deref;
+use std::{
+    ops::Deref,
+    time::{Duration, Instant},
+};
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct BulkString {
     pub length: usize,
     pub data: SimpleString,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SimpleString(String);
 
 impl Deref for SimpleString {
@@ -26,25 +29,52 @@ pub enum Command {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct SetConfig {
+    old_time: Instant,
+    expiry_duration: Option<Duration>,
+}
+
+impl SetConfig {
+    pub fn has_expired(&self) -> bool {
+        match self.expiry_duration {
+            Some(expiry_duration) => self.old_time.elapsed() > expiry_duration,
+            None => false,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum RedisData {
     Get(BulkString),
     Echo(BulkString),
-    Set(BulkString, BulkString),
+    Set(BulkString, BulkString, SetConfig),
     Ping,
 }
 
 impl RedisData {
     pub fn parse(data: &str) -> anyhow::Result<Self> {
-        dbg!(&data);
-        let values = data.split_terminator('$').collect::<Vec<&str>>();
-        let command = BulkString::parse(values[1])?;
-        let command = Command::try_from(command.data.as_str())?;
+        let values: Vec<BulkString> = data
+            .split_terminator('$')
+            .skip(1)
+            .filter_map(|x| BulkString::parse(x).ok())
+            .collect();
+        let command = Command::try_from(values[0].data.as_str())?;
         let redis_data = match command {
-            Command::Echo if values.len() == 3 => Self::Echo(BulkString::parse(values[2])?),
-            Command::Get if values.len() == 3 => Self::Get(BulkString::parse(values[2])?),
+            Command::Echo if values.len() == 2 => Self::Echo(values[1].clone()),
+            Command::Get if values.len() == 2 => Self::Get(values[1].clone()),
             Command::Ping => Self::Ping,
-            Command::Set if values.len() == 4 => {
-                Self::Set(BulkString::parse(values[2])?, BulkString::parse(values[3])?)
+            Command::Set if values.len() >= 3 => {
+                let mut config = SetConfig {
+                    old_time: Instant::now(),
+                    expiry_duration: None,
+                };
+                if let (Some(px), Some(time)) = (values.get(3), values.get(4)) {
+                    if px.data.to_lowercase().as_str() == "px" {
+                        let expiry_duration: u64 = time.data.parse()?;
+                        config.expiry_duration = Some(Duration::from_millis(expiry_duration));
+                    }
+                };
+                Self::Set(values[1].clone(), values[2].clone(), config)
             }
             _ => anyhow::bail!(
                 "incorrect number of values {} for {command:?}",
@@ -139,6 +169,10 @@ mod tests {
             BulkString {
                 length: 3,
                 data: "bar".into(),
+            },
+            SetConfig {
+                old_time: Instant::now(),
+                expiry_duration: None,
             },
         );
         assert_eq!(result, data);
