@@ -11,6 +11,7 @@ async fn main() -> anyhow::Result<()> {
     //
 
     let mut port = None;
+    let mut replicaof = false;
 
     let args: Vec<String> = env::args().collect();
 
@@ -21,6 +22,8 @@ async fn main() -> anyhow::Result<()> {
                     port = Some(args[i + 1].clone());
                 }
             }
+            "--replicaof" => replicaof = true,
+
             _ => (),
         }
     }
@@ -30,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let address = format!("127.0.0.1:{port}");
 
-    let state = State::default();
+    let state = State::new(replicaof);
     let listener = TcpListener::bind(address).await?;
     loop {
         let (mut socket, _) = listener.accept().await?;
