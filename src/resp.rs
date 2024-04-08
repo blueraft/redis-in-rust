@@ -26,6 +26,7 @@ pub enum Command {
     Ping,
     Set,
     Get,
+    Info,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -48,7 +49,14 @@ pub enum RedisData {
     Get(BulkString),
     Echo(BulkString),
     Set(BulkString, BulkString, SetConfig),
+    Info(InfoArg),
     Ping,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InfoArg {
+    All,
+    Replication,
 }
 
 impl RedisData {
@@ -63,6 +71,12 @@ impl RedisData {
             Command::Echo if values.len() == 2 => Self::Echo(values[1].clone()),
             Command::Get if values.len() == 2 => Self::Get(values[1].clone()),
             Command::Ping => Self::Ping,
+            Command::Info => {
+                if values.len() > 1 {
+                    // TODO: filter for the argument
+                }
+                Self::Info(InfoArg::Replication)
+            }
             Command::Set if values.len() >= 3 => {
                 let mut config = SetConfig {
                     old_time: Instant::now(),
@@ -94,6 +108,7 @@ impl TryFrom<&str> for Command {
             "ping" => Ok(Command::Ping),
             "set" => Ok(Command::Set),
             "get" => Ok(Command::Get),
+            "info" => Ok(Command::Info),
             _ => Err(anyhow::anyhow!("Invalid command {value}")),
         }
     }
@@ -126,6 +141,13 @@ impl BulkString {
 
     pub fn decode(&self) -> String {
         format!("${}\r\n{}", self.length, self.data.decode())
+    }
+
+    pub fn encode(data: &str) -> Self {
+        Self {
+            data: data.into(),
+            length: data.len(),
+        }
     }
 }
 

@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::resp::{BulkString, RedisData, SetConfig};
+use crate::resp::{BulkString, InfoArg, RedisData, SetConfig};
 
 #[derive(Debug)]
 struct HashValue {
@@ -26,6 +26,20 @@ impl State {
         let redis_data = RedisData::parse(request)?;
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),
+            RedisData::Info(info_arg) => {
+                let mut infos = Vec::new();
+                match info_arg {
+                    InfoArg::All => {
+                        let replication_info = BulkString::encode("role:master").decode();
+                        infos.push(replication_info);
+                    }
+                    InfoArg::Replication => {
+                        let replication_info = BulkString::encode("role:master").decode();
+                        infos.push(replication_info);
+                    }
+                };
+                infos.join("\r\n")
+            }
             RedisData::Set(key, value, config) => {
                 let mut map = self.map.lock().unwrap();
                 map.insert(key, HashValue { value, config });
