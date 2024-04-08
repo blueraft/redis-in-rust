@@ -1,12 +1,12 @@
 use std::ops::Deref;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct BulkString {
     pub length: usize,
     pub data: SimpleString,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SimpleString(String);
 
 impl Deref for SimpleString {
@@ -21,33 +21,37 @@ impl Deref for SimpleString {
 pub enum Command {
     Echo,
     Ping,
+    Set,
+    Get,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct RedisData {
-    pub command: Command,
-    pub data: Option<BulkString>,
+pub enum RedisData {
+    Get(BulkString),
+    Echo(BulkString),
+    Set(BulkString, BulkString),
+    Ping,
 }
 
 impl RedisData {
     pub fn parse(data: &str) -> anyhow::Result<Self> {
         dbg!(&data);
         let values = data.split_terminator('$').collect::<Vec<&str>>();
-        if values.len() == 3 {
-            let command = BulkString::parse(values[1])?;
-            Ok(Self {
-                command: Command::try_from(command.data.as_str())?,
-                data: Some(BulkString::parse(values[2])?),
-            })
-        } else if values.len() == 2 {
-            let command = BulkString::parse(values[1])?;
-            Ok(Self {
-                command: Command::try_from(command.data.as_str())?,
-                data: None,
-            })
-        } else {
-            anyhow::bail!("Invalid number of values for redis-data")
-        }
+        let command = BulkString::parse(values[1])?;
+        let command = Command::try_from(command.data.as_str())?;
+        let redis_data = match command {
+            Command::Echo if values.len() == 3 => Self::Echo(BulkString::parse(values[2])?),
+            Command::Get if values.len() == 3 => Self::Get(BulkString::parse(values[2])?),
+            Command::Ping => Self::Ping,
+            Command::Set if values.len() == 4 => {
+                Self::Set(BulkString::parse(values[2])?, BulkString::parse(values[3])?)
+            }
+            _ => anyhow::bail!(
+                "incorrect number of values {} for {command:?}",
+                values.len()
+            ),
+        };
+        Ok(redis_data)
     }
 }
 
@@ -58,6 +62,8 @@ impl TryFrom<&str> for Command {
         match value.to_lowercase().as_str() {
             "echo" => Ok(Command::Echo),
             "ping" => Ok(Command::Ping),
+            "set" => Ok(Command::Set),
+            "get" => Ok(Command::Get),
             _ => Err(anyhow::anyhow!("Invalid command {value}")),
         }
     }
@@ -101,12 +107,41 @@ mod tests {
         let result = RedisData::parse("*2\r\n$4\r\necho\r\n$3\r\nhey\r\n");
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.command, Command::Echo);
-        let data = BulkString {
+        let data = RedisData::Echo(BulkString {
             length: 3,
             data: "hey".into(),
-        };
-        assert_eq!(result.data.unwrap(), data);
+        });
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn parse_get_data() {
+        let result = RedisData::parse("*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let data = RedisData::Get(BulkString {
+            length: 3,
+            data: "foo".into(),
+        });
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn parse_set_data() {
+        let result = RedisData::parse("*3\r\n$3\r\nset\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let data = RedisData::Set(
+            BulkString {
+                length: 3,
+                data: "foo".into(),
+            },
+            BulkString {
+                length: 3,
+                data: "bar".into(),
+            },
+        );
+        assert_eq!(result, data);
     }
 
     #[test]
@@ -114,8 +149,7 @@ mod tests {
         let result = RedisData::parse("*1\r\n$4\r\nping\r\n");
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.command, Command::Ping);
-        assert!(result.data.is_none());
+        assert_eq!(result, RedisData::Ping);
     }
 
     #[test]
