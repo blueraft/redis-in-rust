@@ -1,3 +1,5 @@
+use std::env;
+
 use redis_starter_rust::state::State;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -7,8 +9,29 @@ async fn main() -> anyhow::Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
     //
+
+    let mut port = None;
+
+    let args: Vec<String> = env::args().collect();
+
+    for i in 1..args.len() {
+        match args[i].as_str() {
+            "--port" | "-p" => {
+                if i + 1 < args.len() {
+                    port = Some(args[i + 1].clone());
+                }
+            }
+            _ => (),
+        }
+    }
+    let port = match port {
+        Some(p) => p,
+        None => "6379".to_string(),
+    };
+    let address = format!("127.0.0.1:{port}");
+
     let state = State::default();
-    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    let listener = TcpListener::bind(address).await?;
     loop {
         let (mut socket, _) = listener.accept().await?;
 
