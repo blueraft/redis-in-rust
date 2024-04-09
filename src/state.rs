@@ -12,41 +12,81 @@ struct HashValue {
 }
 
 #[derive(Debug, Clone)]
+pub struct ReplicaConfig {
+    replid: String,
+    repl_offset: usize,
+    role: Role,
+}
+
+#[derive(Debug, Clone)]
+pub enum Role {
+    Master,
+    Slave,
+}
+
+impl ReplicaConfig {
+    fn generate_response(&self) -> String {
+        match self.role {
+            Role::Slave => {
+                format!(
+                    "# Replication\r\nrole:slave\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n",
+                    self.replid, self.repl_offset
+                )
+            }
+            Role::Master => {
+                format!(
+                    "# Replication\r\nrole:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n",
+                    self.replid, self.repl_offset
+                )
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct State {
     map: Arc<Mutex<HashMap<BulkString, HashValue>>>,
-    replicaof: bool,
+    replica_config: ReplicaConfig,
 }
 
 impl State {
     pub fn new(replicaof: bool) -> Self {
+        let replica_config = ReplicaConfig {
+            replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
+            repl_offset: 0,
+            role: match replicaof {
+                true => Role::Slave,
+                false => Role::Master,
+            },
+        };
+
         Self {
             map: Arc::new(Mutex::new(HashMap::new())),
-            replicaof,
+            replica_config,
         }
     }
     pub fn handle_response(&mut self, request: &str) -> anyhow::Result<String> {
         let redis_data = RedisData::parse(request)?;
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),
-            RedisData::Info(info_arg) => {
-                let mut infos = Vec::new();
-                let replication_info = match self.replicaof {
-                    true => "slave",
-                    false => "master",
-                };
-                let replication_info = format!("role:{replication_info}");
-                match info_arg {
-                    InfoArg::All => {
-                        let replication_info = BulkString::encode(&replication_info).decode();
-                        infos.push(replication_info);
-                    }
-                    InfoArg::Replication => {
-                        let replication_info = BulkString::encode(&replication_info).decode();
-                        infos.push(replication_info);
-                    }
-                };
-                infos.join("\r\n")
-            }
+            RedisData::Info(info_arg) => match info_arg {
+                InfoArg::All => {
+                    let mut infos = Vec::new();
+                    infos.push(self.replica_config.generate_response());
+                    format!(
+                        "*{}\r\n{}",
+                        infos.len(),
+                        infos
+                            .iter()
+                            .map(|r| BulkString::encode(r).decode())
+                            .collect::<Vec<String>>()
+                            .join("")
+                    )
+                }
+                InfoArg::Replication => {
+                    BulkString::encode(&self.replica_config.generate_response()).decode()
+                }
+            },
             RedisData::Set(key, value, config) => {
                 let mut map = self.map.lock().unwrap();
                 map.insert(key, HashValue { value, config });
@@ -67,6 +107,7 @@ impl State {
             }
             RedisData::Echo(data) => data.decode(),
         };
+        dbg!(&response);
         Ok(response)
     }
 }
