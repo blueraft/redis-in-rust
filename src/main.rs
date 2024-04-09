@@ -1,8 +1,14 @@
 use std::env;
 
-use redis_starter_rust::state::State;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use redis_starter_rust::{
+    resp::BulkString,
+    state::{MasterConfig, State},
+};
 use tokio::net::TcpListener;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -12,7 +18,8 @@ async fn main() -> anyhow::Result<()> {
 
     let mut port = None;
     let mut replicaof = false;
-
+    let mut master_host = None;
+    let mut master_port = None;
     let args: Vec<String> = env::args().collect();
 
     for i in 1..args.len() {
@@ -22,7 +29,13 @@ async fn main() -> anyhow::Result<()> {
                     port = Some(args[i + 1].clone());
                 }
             }
-            "--replicaof" => replicaof = true,
+            "--replicaof" => {
+                if i + 2 < args.len() {
+                    master_host = Some(args[i + 1].clone());
+                    master_port = Some(args[i + 2].parse().clone()?);
+                }
+                replicaof = true;
+            }
 
             _ => (),
         }
@@ -33,8 +46,24 @@ async fn main() -> anyhow::Result<()> {
     };
     let address = format!("127.0.0.1:{port}");
 
-    let state = State::new(replicaof);
+    let master_config = if let (Some(host), Some(port)) = (master_host, master_port) {
+        Some(MasterConfig { host, port })
+    } else {
+        None
+    };
+
+    let state = State::new(replicaof, master_config.clone());
+
+    tokio::spawn(async move {
+        if let Some(config) = master_config {
+            let address = format!("{}:{}", config.host, config.port);
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            stream.write_all(b"*1\r\n$4\r\nping\r\n").await.unwrap();
+        }
+    });
+
     let listener = TcpListener::bind(address).await?;
+
     loop {
         let (mut socket, _) = listener.accept().await?;
 

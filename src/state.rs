@@ -19,6 +19,12 @@ pub struct ReplicaConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct MasterConfig {
+    pub host: String,
+    pub port: usize,
+}
+
+#[derive(Debug, Clone)]
 pub enum Role {
     Master,
     Slave,
@@ -50,7 +56,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(replicaof: bool) -> Self {
+    pub fn new(replicaof: bool, master_config: Option<MasterConfig>) -> Self {
         let replica_config = ReplicaConfig {
             replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
             repl_offset: 0,
@@ -114,7 +120,7 @@ impl State {
 
 impl Default for State {
     fn default() -> Self {
-        Self::new(false)
+        Self::new(false, None)
     }
 }
 
