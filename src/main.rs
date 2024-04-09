@@ -54,13 +54,52 @@ async fn main() -> anyhow::Result<()> {
 
     let state = State::new(replicaof, master_config.clone());
 
-    tokio::spawn(async move {
-        if let Some(config) = master_config {
-            let address = format!("{}:{}", config.host, config.port);
-            let mut stream = TcpStream::connect(address).await.unwrap();
-            stream.write_all(b"*1\r\n$4\r\nping\r\n").await.unwrap();
-        }
-    });
+    {
+        let mut state = state.clone();
+        tokio::spawn(async move {
+            if let Some(config) = master_config {
+                let address = format!("{}:{}", config.host, config.port);
+                let mut stream = TcpStream::connect(address).await.unwrap();
+                stream.write_all(b"*1\r\n$4\r\nping\r\n").await.unwrap();
+                let mut buf = [0; 1024];
+
+                match stream.read(&mut buf).await {
+                    Ok(n) => {
+                        if n == 0 {
+                            return;
+                        }
+                        let replconf1 =
+                            "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n"
+                                .to_owned();
+                        stream.write_all(replconf1.as_bytes()).await.unwrap();
+                        let replconf2 =
+                            "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".to_owned();
+                        stream.write_all(replconf2.as_bytes()).await.unwrap();
+                    }
+                    Err(_) => todo!(),
+                }
+                loop {
+                    match stream.read(&mut buf).await {
+                        Ok(n) => {
+                            if n == 0 {
+                                // connection closed
+                                return;
+                            }
+                            let request = String::from_utf8_lossy(&buf[..n]);
+                            let response = state
+                                .handle_response(&request)
+                                .expect("failed to generate response");
+                            stream.write_all(response.as_bytes()).await.unwrap();
+                        }
+                        Err(e) => {
+                            eprintln!("failed to read from socket; err = {:?}", e);
+                            return;
+                        }
+                    };
+                }
+            }
+        });
+    }
 
     let listener = TcpListener::bind(address).await?;
 

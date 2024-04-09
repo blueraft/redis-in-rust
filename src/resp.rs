@@ -27,6 +27,7 @@ pub enum Command {
     Set,
     Get,
     Info,
+    Replconf,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -51,6 +52,7 @@ pub enum RedisData {
     Set(BulkString, BulkString, SetConfig),
     Info(InfoArg),
     Ping,
+    ReplConf(BulkString, BulkString),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -76,6 +78,9 @@ impl RedisData {
                     // TODO: filter for the argument
                 }
                 Self::Info(InfoArg::Replication)
+            }
+            Command::Replconf if values.len() == 2 => {
+                Self::ReplConf(values[1].clone(), values[2].clone())
             }
             Command::Set if values.len() >= 3 => {
                 let mut config = SetConfig {
@@ -109,6 +114,7 @@ impl TryFrom<&str> for Command {
             "set" => Ok(Command::Set),
             "get" => Ok(Command::Get),
             "info" => Ok(Command::Info),
+            "replconf" => Ok(Command::Replconf),
             _ => Err(anyhow::anyhow!("Invalid command {value}")),
         }
     }

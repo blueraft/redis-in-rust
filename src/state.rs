@@ -56,7 +56,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(replicaof: bool, master_config: Option<MasterConfig>) -> Self {
+    pub fn new(replicaof: bool, _master_config: Option<MasterConfig>) -> Self {
         let replica_config = ReplicaConfig {
             replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
             repl_offset: 0,
@@ -112,6 +112,11 @@ impl State {
                 }
             }
             RedisData::Echo(data) => data.decode(),
+            RedisData::ReplConf(cmd, _arg) => match cmd.data.as_str() {
+                "listening-port" => "+OK\r\n".to_owned(),
+                "capa" => "+OK\r\n".to_owned(),
+                _ => anyhow::bail!("invalid cmd"),
+            },
         };
         dbg!(&response);
         Ok(response)
