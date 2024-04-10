@@ -70,9 +70,18 @@ async fn main() -> anyhow::Result<()> {
                         stream.write_all(replconf1).await.unwrap();
                         let replconf2 = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
                         stream.write_all(replconf2).await.unwrap();
+                    }
+                    Err(_) => todo!(),
+                }
+                match stream.read(&mut buf).await {
+                    Ok(n) => {
+                        if n == 0 {
+                            return;
+                        }
                         let psync_initial = b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
                         stream.write_all(psync_initial).await.unwrap();
                     }
+
                     Err(_) => todo!(),
                 }
                 loop {
