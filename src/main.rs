@@ -1,9 +1,6 @@
 use std::env;
 
-use redis_starter_rust::{
-    resp::BulkString,
-    state::{MasterConfig, State},
-};
+use redis_starter_rust::state::{MasterConfig, State};
 use tokio::net::TcpListener;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
