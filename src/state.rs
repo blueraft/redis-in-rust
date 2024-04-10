@@ -98,6 +98,14 @@ impl State {
                 map.insert(key, HashValue { value, config });
                 "+OK\r\n".to_owned()
             }
+            RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
+                "?" => {
+                    let resp = format!("+FULLRESYNC {} 0\r\n", self.replica_config.replid);
+                    resp.to_owned()
+                }
+                _ => anyhow::bail!("not supported"),
+            },
+
             RedisData::Get(key) => {
                 let mut map = self.map.lock().unwrap();
                 match map.get(&key) {

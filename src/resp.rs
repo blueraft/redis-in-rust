@@ -28,6 +28,7 @@ pub enum Command {
     Get,
     Info,
     Replconf,
+    Psync,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -53,6 +54,7 @@ pub enum RedisData {
     Info(InfoArg),
     Ping,
     ReplConf(BulkString, BulkString),
+    Psync(BulkString, BulkString),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -81,6 +83,10 @@ impl RedisData {
             }
             Command::Replconf if values.len() == 2 => {
                 Self::ReplConf(values[1].clone(), values[2].clone())
+            }
+
+            Command::Psync if values.len() == 2 => {
+                Self::Psync(values[1].clone(), values[2].clone())
             }
             Command::Set if values.len() >= 3 => {
                 let mut config = SetConfig {

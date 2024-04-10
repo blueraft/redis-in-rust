@@ -69,12 +69,12 @@ async fn main() -> anyhow::Result<()> {
                             return;
                         }
                         let replconf1 =
-                            "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n"
-                                .to_owned();
-                        stream.write_all(replconf1.as_bytes()).await.unwrap();
-                        let replconf2 =
-                            "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".to_owned();
-                        stream.write_all(replconf2.as_bytes()).await.unwrap();
+                            b"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n";
+                        stream.write_all(replconf1).await.unwrap();
+                        let replconf2 = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+                        stream.write_all(replconf2).await.unwrap();
+                        let psync_initial = b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+                        stream.write_all(psync_initial).await.unwrap();
                     }
                     Err(_) => todo!(),
                 }
