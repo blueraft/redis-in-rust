@@ -81,7 +81,7 @@ impl RedisData {
                 }
                 Self::Info(InfoArg::Replication)
             }
-            Command::Replconf if values.len() == 2 => {
+            Command::Replconf if values.len() >= 3 => {
                 Self::ReplConf(values[1].clone(), values[2].clone())
             }
 
