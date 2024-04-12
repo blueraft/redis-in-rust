@@ -121,7 +121,7 @@ impl TryFrom<&str> for Command {
             "get" => Ok(Command::Get),
             "info" => Ok(Command::Info),
             "replconf" => Ok(Command::Replconf),
-            "psync" => Ok(Command::Replconf),
+            "psync" => Ok(Command::Psync),
             _ => Err(anyhow::anyhow!("Invalid command {value}")),
         }
     }
