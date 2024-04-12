@@ -85,7 +85,7 @@ impl RedisData {
                 Self::ReplConf(values[1].clone(), values[2].clone())
             }
 
-            Command::Psync if values.len() == 2 => {
+            Command::Psync if values.len() >= 3 => {
                 Self::Psync(values[1].clone(), values[2].clone())
             }
             Command::Set if values.len() >= 3 => {
