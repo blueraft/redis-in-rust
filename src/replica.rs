@@ -56,11 +56,23 @@ pub async fn initiate_replica_connection(
                     return Ok(());
                 }
                 let request = String::from_utf8_lossy(&buf[..n]);
-                let redis_data = RedisData::parse(&request).expect("failed to parse request");
-                let response = state
-                    .handle_response(&redis_data)
-                    .expect("failed to generate response");
-                stream.write_all(response.as_bytes()).await.unwrap();
+                for request in request.split('*') {
+                    match RedisData::parse(request) {
+                        Ok(redis_data) => {
+                            let response = state
+                                .handle_response(&redis_data)
+                                .expect("failed to generate response");
+                            match redis_data {
+                                RedisData::Set(_, _, _) => Ok(()),
+                                _ => stream.write_all(response.as_bytes()).await,
+                            }
+                            .expect("failed to send response");
+                        }
+                        Err(e) => {
+                            eprintln!("failed to parse request {request:?}; err = {e:?}");
+                        }
+                    }
+                }
             }
             Err(e) => {
                 eprintln!("failed to read from socket; err = {:?}", e);

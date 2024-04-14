@@ -47,6 +47,7 @@ impl RedisData {
             .skip(1)
             .filter_map(|x| BulkString::parse(x).ok())
             .collect();
+        anyhow::ensure!(values.len() >= 1);
         let command = Command::try_from(values[0].data.as_str())?;
         let redis_data = match command {
             Command::Echo if values.len() == 2 => Self::Echo(values[1].clone()),
