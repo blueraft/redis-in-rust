@@ -5,11 +5,8 @@ use redis_starter_rust::{
     resp::RedisData,
     state::{MasterConfig, State},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -54,53 +51,48 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let state = State::new(replicaof, master_config.clone());
-    let mut replica_task = if let Some(config) = master_config {
+    if let Some(config) = master_config {
         let state = state.clone();
-        tokio::spawn(async move { initiate_replica_connection(state, config).await })
-    } else {
-        tokio::spawn(async { Ok(()) })
+        tokio::spawn(async move { initiate_replica_connection(state, config).await });
     };
 
     let listener = TcpListener::bind(address).await?;
 
-    let (mut socket, _) = listener.accept().await?;
+    loop {
+        let (mut socket, _) = listener.accept().await?;
 
-    let mut state = state.clone();
-    let mut main_task = tokio::spawn(async move {
-        let mut buf = [0; 1024];
-        loop {
-            match socket.read(&mut buf).await {
-                Ok(n) => {
-                    if n == 0 {
-                        // connection closed
+        let mut state = state.clone();
+        tokio::spawn(async move {
+            let mut buf = [0; 1024];
+            loop {
+                match socket.read(&mut buf).await {
+                    Ok(n) => {
+                        if n == 0 {
+                            // connection closed
+                            return;
+                        }
+                        let request = String::from_utf8_lossy(&buf[..n]);
+                        let redis_data =
+                            RedisData::parse(&request).expect("failed to parse request");
+                        let response = state
+                            .handle_response(&redis_data)
+                            .expect("failed to generate response");
+                        socket.write_all(response.as_bytes()).await.unwrap();
+                        match redis_data {
+                            RedisData::Psync(_, _) => {
+                                let rdb = state.replica_request().unwrap();
+                                socket.write_all(&rdb).await
+                            }
+                            _ => Ok(()),
+                        }
+                        .expect("Failed to write to replica");
+                    }
+                    Err(e) => {
+                        eprintln!("failed to read from socket; err = {:?}", e);
                         return;
                     }
-                    let request = String::from_utf8_lossy(&buf[..n]);
-                    let redis_data = RedisData::parse(&request).expect("failed to parse request");
-                    let response = state
-                        .handle_response(&redis_data)
-                        .expect("failed to generate response");
-                    socket.write_all(response.as_bytes()).await.unwrap();
-                    match redis_data {
-                        RedisData::Psync(_, _) => {
-                            let rdb = state.replica_request().unwrap();
-                            socket.write_all(&rdb).await
-                        }
-                        _ => Ok(()),
-                    }
-                    .expect("Failed to write to replica");
-                }
-                Err(e) => {
-                    eprintln!("failed to read from socket; err = {:?}", e);
-                    return;
-                }
-            };
-        }
-    });
-
-    tokio::select! {
-        _ = (&mut main_task) => {},
-        _ = (&mut replica_task) => {},
-    };
-    Ok(())
+                };
+            }
+        });
+    }
 }
