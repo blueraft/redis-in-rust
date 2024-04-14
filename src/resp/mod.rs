@@ -5,9 +5,10 @@ use command::Command;
 
 pub(crate) mod bulk_string;
 pub(crate) mod command;
+pub(crate) mod rdb;
 pub(crate) mod simple_string;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SetConfig {
     old_time: Instant,
     expiry_duration: Option<Duration>,

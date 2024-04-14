@@ -1,6 +1,9 @@
 use std::env;
 
-use redis_starter_rust::state::{MasterConfig, State};
+use redis_starter_rust::{
+    resp::RedisData,
+    state::{MasterConfig, State},
+};
 use tokio::net::TcpListener;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -92,8 +95,10 @@ async fn main() -> anyhow::Result<()> {
                                 return;
                             }
                             let request = String::from_utf8_lossy(&buf[..n]);
+                            let redis_data =
+                                RedisData::parse(&request).expect("failed to parse request");
                             let response = state
-                                .handle_response(&request)
+                                .handle_response(&redis_data)
                                 .expect("failed to generate response");
                             stream.write_all(response.as_bytes()).await.unwrap();
                         }
@@ -123,10 +128,20 @@ async fn main() -> anyhow::Result<()> {
                             return;
                         }
                         let request = String::from_utf8_lossy(&buf[..n]);
+                        let redis_data =
+                            RedisData::parse(&request).expect("failed to parse request");
                         let response = state
-                            .handle_response(&request)
+                            .handle_response(&redis_data)
                             .expect("failed to generate response");
                         socket.write_all(response.as_bytes()).await.unwrap();
+                        match redis_data {
+                            RedisData::Psync(_, _) => {
+                                let rdb = state.replica_request().unwrap();
+                                socket.write_all(&rdb).await
+                            }
+                            _ => Ok(()),
+                        }
+                        .expect("Failed to write to replica");
                     }
                     Err(e) => {
                         eprintln!("failed to read from socket; err = {:?}", e);

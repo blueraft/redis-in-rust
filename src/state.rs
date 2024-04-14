@@ -3,7 +3,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::resp::{bulk_string::BulkString, InfoArg, RedisData, SetConfig};
+use bytes::BytesMut;
+
+use crate::resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData, SetConfig};
 
 #[derive(Debug)]
 struct HashValue {
@@ -71,8 +73,7 @@ impl State {
             replica_config,
         }
     }
-    pub fn handle_response(&mut self, request: &str) -> anyhow::Result<String> {
-        let redis_data = RedisData::parse(request)?;
+    pub fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),
             RedisData::Info(info_arg) => match info_arg {
@@ -95,7 +96,13 @@ impl State {
             },
             RedisData::Set(key, value, config) => {
                 let mut map = self.map.lock().unwrap();
-                map.insert(key, HashValue { value, config });
+                map.insert(
+                    key.to_owned(),
+                    HashValue {
+                        value: value.to_owned(),
+                        config: config.to_owned(),
+                    },
+                );
                 "+OK\r\n".to_owned()
             }
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
@@ -108,10 +115,10 @@ impl State {
 
             RedisData::Get(key) => {
                 let mut map = self.map.lock().unwrap();
-                match map.get(&key) {
+                match map.get(key) {
                     Some(hash_value) => match hash_value.config.has_expired() {
                         true => {
-                            map.remove(&key);
+                            map.remove(key);
                             "$-1\r\n".to_owned()
                         }
                         false => hash_value.value.decode(),
@@ -126,8 +133,16 @@ impl State {
                 _ => anyhow::bail!("invalid cmd"),
             },
         };
-        dbg!(&response);
         Ok(response)
+    }
+
+    pub fn replica_request(&self) -> anyhow::Result<BytesMut> {
+        let hex_file = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2".to_string();
+        let rdb_file = Rdb {
+            length: hex_file.len(),
+            hex_content: hex_file,
+        };
+        rdb_file.decode()
     }
 }
 
@@ -143,7 +158,8 @@ mod tests {
     #[test]
     fn test_get_not_found_get() {
         let mut state = State::default();
-        let result = state.handle_response("*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n");
+        let redis_data = RedisData::parse("*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n").unwrap();
+        let result = state.handle_response(&redis_data);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "$-1\r\n".to_owned())
     }
@@ -151,10 +167,12 @@ mod tests {
     #[test]
     fn test_set_and_get() {
         let mut state = State::default();
-        let result = state.handle_response("*3\r\n$3\r\nset\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
+        let redis_data = RedisData::parse("*3\r\n$3\r\nset\r\n$3\r\nfoo\r\n$3\r\nbar\r\n").unwrap();
+        let result = state.handle_response(&redis_data);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "+OK\r\n".to_owned());
-        let result = state.handle_response("*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n");
+        let redis_data = RedisData::parse("*2\r\n$3\r\nget\r\n$3\r\nfoo\r\n").unwrap();
+        let result = state.handle_response(&redis_data);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result, "$3\r\nbar\r\n")
