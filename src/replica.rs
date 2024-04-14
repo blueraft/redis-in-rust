@@ -73,6 +73,7 @@ pub async fn initiate_replica_connection(
                                 _ => Ok(()),
                             }
                             .expect("failed to send response");
+                            // TODO: this should be optimised
                             let total_req = format!(
                                 "*{}\r\n{}",
                                 request.split('$').collect::<Vec<&str>>().len(),

@@ -130,7 +130,7 @@ impl State {
                 }
                 _ => anyhow::bail!("not supported"),
             },
-
+            RedisData::Wait(_, _) => ":0\r\n".to_owned(),
             RedisData::Get(key) => {
                 let mut map = self.map.lock().unwrap();
                 match map.get(key) {

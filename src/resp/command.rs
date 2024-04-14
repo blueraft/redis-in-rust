@@ -7,6 +7,7 @@ pub enum Command {
     Info,
     Replconf,
     Psync,
+    Wait,
 }
 
 impl TryFrom<&str> for Command {
@@ -21,6 +22,7 @@ impl TryFrom<&str> for Command {
             "info" => Ok(Command::Info),
             "replconf" => Ok(Command::Replconf),
             "psync" => Ok(Command::Psync),
+            "wait" => Ok(Command::Wait),
             _ => Err(anyhow::anyhow!("Invalid command {value}")),
         }
     }
