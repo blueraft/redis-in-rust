@@ -7,6 +7,7 @@ use std::{
 };
 
 use bytes::BytesMut;
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 use crate::resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData, SetConfig};
 
@@ -66,7 +67,11 @@ pub struct State {
 impl State {
     pub fn new(replicaof: bool, _master_config: Option<MasterConfig>) -> Self {
         let replica_config = ReplicaConfig {
-            replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
+            replid: thread_rng()
+                .sample_iter(&Alphanumeric)
+                .map(char::from)
+                .take(40)
+                .collect(),
             repl_offset: AtomicUsize::new(0),
             num_replicas: AtomicUsize::new(0),
             role: match replicaof {
