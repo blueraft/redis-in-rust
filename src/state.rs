@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::resp::{BulkString, InfoArg, RedisData, SetConfig};
+use crate::resp::{bulk_string::BulkString, InfoArg, RedisData, SetConfig};
 
 #[derive(Debug)]
 struct HashValue {

@@ -1,35 +1,11 @@
-use std::{
-    ops::Deref,
-    time::{Duration, Instant},
-};
+use bulk_string::BulkString;
+use std::time::{Duration, Instant};
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct BulkString {
-    pub length: usize,
-    pub data: SimpleString,
-}
+use command::Command;
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct SimpleString(String);
-
-impl Deref for SimpleString {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Command {
-    Echo,
-    Ping,
-    Set,
-    Get,
-    Info,
-    Replconf,
-    Psync,
-}
+pub(crate) mod bulk_string;
+pub(crate) mod command;
+pub(crate) mod simple_string;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SetConfig {
@@ -107,60 +83,6 @@ impl RedisData {
             ),
         };
         Ok(redis_data)
-    }
-}
-
-impl TryFrom<&str> for Command {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
-            "echo" => Ok(Command::Echo),
-            "ping" => Ok(Command::Ping),
-            "set" => Ok(Command::Set),
-            "get" => Ok(Command::Get),
-            "info" => Ok(Command::Info),
-            "replconf" => Ok(Command::Replconf),
-            "psync" => Ok(Command::Psync),
-            _ => Err(anyhow::anyhow!("Invalid command {value}")),
-        }
-    }
-}
-
-impl From<&str> for SimpleString {
-    fn from(value: &str) -> Self {
-        Self(value.to_string())
-    }
-}
-
-impl SimpleString {
-    fn decode(&self) -> String {
-        format!("{}\r\n", self.0)
-    }
-}
-
-impl BulkString {
-    pub fn parse(value: &str) -> anyhow::Result<Self> {
-        let values = value.split_terminator("\r\n").collect::<Vec<&str>>();
-        if values.len() != 2 {
-            anyhow::bail!("Invalid num values")
-        };
-        let bulk_string = Self {
-            length: values[0].parse()?,
-            data: values[1].into(),
-        };
-        Ok(bulk_string)
-    }
-
-    pub fn decode(&self) -> String {
-        format!("${}\r\n{}", self.length, self.data.decode())
-    }
-
-    pub fn encode(data: &str) -> Self {
-        Self {
-            data: data.into(),
-            length: data.len(),
-        }
     }
 }
 
