@@ -88,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
                         if let RedisData::Psync(_, _) = redis_data {
                             let rdb = state.replica_request().unwrap();
                             let _ = socket.write_all(&rdb).await;
+                            state.increment_num_replicas();
                             replica_initialized = true;
                         };
                     }

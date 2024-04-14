@@ -20,6 +20,7 @@ struct HashValue {
 pub struct ReplicaConfig {
     replid: String,
     repl_offset: AtomicUsize,
+    num_replicas: AtomicUsize,
     role: Role,
 }
 
@@ -67,6 +68,7 @@ impl State {
         let replica_config = ReplicaConfig {
             replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
             repl_offset: AtomicUsize::new(0),
+            num_replicas: AtomicUsize::new(0),
             role: match replicaof {
                 true => Role::Slave,
                 false => Role::Master,
@@ -87,6 +89,13 @@ impl State {
             .fetch_add(increment, Ordering::Acquire);
     }
 
+    pub fn increment_num_replicas(&self) {
+        self.replica_config
+            .lock()
+            .unwrap()
+            .num_replicas
+            .fetch_add(1, Ordering::Acquire);
+    }
     pub fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),
@@ -130,7 +139,15 @@ impl State {
                 }
                 _ => anyhow::bail!("not supported"),
             },
-            RedisData::Wait(_, _) => ":0\r\n".to_owned(),
+            RedisData::Wait(_, _) => {
+                let num_replica = self
+                    .replica_config
+                    .lock()
+                    .unwrap()
+                    .num_replicas
+                    .load(Ordering::Relaxed);
+                format!(":{}\r\n", num_replica)
+            }
             RedisData::Get(key) => {
                 let mut map = self.map.lock().unwrap();
                 match map.get(key) {
