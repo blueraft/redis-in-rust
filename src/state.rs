@@ -127,10 +127,11 @@ impl State {
                 }
             }
             RedisData::Echo(data) => data.decode(),
-            RedisData::ReplConf(cmd, _arg) => match cmd.data.as_str() {
+            RedisData::ReplConf(cmd, _arg) => match cmd.data.to_lowercase().as_str() {
                 "listening-port" => "+OK\r\n".to_owned(),
                 "capa" => "+OK\r\n".to_owned(),
-                _ => anyhow::bail!("invalid cmd"),
+                "getack" => "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".to_owned(),
+                cmd => anyhow::bail!("invalid cmd {cmd}"),
             },
         };
         Ok(response)

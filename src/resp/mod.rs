@@ -79,10 +79,7 @@ impl RedisData {
                 };
                 Self::Set(values[1].clone(), values[2].clone(), config)
             }
-            _ => anyhow::bail!(
-                "incorrect number of values {} for {command:?}",
-                values.len()
-            ),
+            _ => anyhow::bail!("incorrect {values:?} for {command:?}",),
         };
         Ok(redis_data)
     }

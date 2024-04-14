@@ -1,3 +1,4 @@
+use regex::Regex;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -56,15 +57,20 @@ pub async fn initiate_replica_connection(
                     return Ok(());
                 }
                 let request = String::from_utf8_lossy(&buf[..n]);
-                for request in request.split('*') {
+                let re = Regex::new(r"\*\d+\r\n").unwrap();
+                for request in re.split(&request) {
                     match RedisData::parse(request) {
                         Ok(redis_data) => {
                             let response = state
                                 .handle_response(&redis_data)
                                 .expect("failed to generate response");
+                            // after handshake is complete, only the replconf provides responses to
+                            // primary
                             match redis_data {
-                                RedisData::Set(_, _, _) => Ok(()),
-                                _ => stream.write_all(response.as_bytes()).await,
+                                RedisData::ReplConf(_, _) => {
+                                    stream.write_all(response.as_bytes()).await
+                                }
+                                _ => Ok(()),
                             }
                             .expect("failed to send response");
                         }
