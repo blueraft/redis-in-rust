@@ -1,12 +1,12 @@
 use std::env;
 
 use redis_starter_rust::{
-    replica::initiate_replica_connection,
+    replica::{initiate_replica_connection, send_write_to_replica},
     resp::RedisData,
     state::{MasterConfig, State},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::broadcast};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -58,12 +58,15 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = TcpListener::bind(address).await?;
 
+    let (tx, _rx) = broadcast::channel(100);
+
     loop {
         let (mut socket, _) = listener.accept().await?;
-
         let mut state = state.clone();
+        let tx = tx.clone();
         tokio::spawn(async move {
             let mut buf = [0; 1024];
+            let mut replica_initialized = false;
             loop {
                 match socket.read(&mut buf).await {
                     Ok(n) => {
@@ -74,24 +77,32 @@ async fn main() -> anyhow::Result<()> {
                         let request = String::from_utf8_lossy(&buf[..n]);
                         let redis_data =
                             RedisData::parse(&request).expect("failed to parse request");
+                        let _ = match redis_data {
+                            RedisData::Set(_, _, _) => tx.send(buf[..n].to_vec()),
+                            _ => Ok(0),
+                        };
                         let response = state
                             .handle_response(&redis_data)
                             .expect("failed to generate response");
                         socket.write_all(response.as_bytes()).await.unwrap();
-                        match redis_data {
-                            RedisData::Psync(_, _) => {
-                                let rdb = state.replica_request().unwrap();
-                                socket.write_all(&rdb).await
-                            }
-                            _ => Ok(()),
-                        }
-                        .expect("Failed to write to replica");
+                        if let RedisData::Psync(_, _) = redis_data {
+                            let rdb = state.replica_request().unwrap();
+                            let _ = socket.write_all(&rdb).await;
+                            replica_initialized = true;
+                        };
                     }
                     Err(e) => {
                         eprintln!("failed to read from socket; err = {:?}", e);
                         return;
                     }
                 };
+                if replica_initialized {
+                    break;
+                }
+            }
+            if replica_initialized {
+                let rx = tx.subscribe();
+                tokio::spawn(async move { send_write_to_replica(rx, socket).await });
             }
         });
     }

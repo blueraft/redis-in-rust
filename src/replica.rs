@@ -1,6 +1,7 @@
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    sync::broadcast::Receiver,
 };
 
 use crate::{
@@ -67,4 +68,15 @@ pub async fn initiate_replica_connection(
             }
         };
     }
+}
+
+/// Send `SET` requests from primary to replicas
+pub async fn send_write_to_replica(
+    mut rx: Receiver<Vec<u8>>,
+    mut socket: TcpStream,
+) -> anyhow::Result<()> {
+    while let Ok(msg) = rx.recv().await {
+        socket.write_all(&msg).await?;
+    }
+    Ok(())
 }
