@@ -73,6 +73,12 @@ pub async fn initiate_replica_connection(
                                 _ => Ok(()),
                             }
                             .expect("failed to send response");
+                            let total_req = format!(
+                                "*{}\r\n{}",
+                                request.split('$').collect::<Vec<&str>>().len(),
+                                request
+                            );
+                            state.increment_offset(total_req.as_bytes().len());
                         }
                         Err(e) => {
                             eprintln!("failed to parse request {request:?}; err = {e:?}");

@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use bytes::BytesMut;
@@ -13,10 +16,10 @@ struct HashValue {
     config: SetConfig,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ReplicaConfig {
     replid: String,
-    repl_offset: usize,
+    repl_offset: AtomicUsize,
     role: Role,
 }
 
@@ -38,13 +41,15 @@ impl ReplicaConfig {
             Role::Slave => {
                 format!(
                     "# Replication\r\nrole:slave\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n",
-                    self.replid, self.repl_offset
+                    self.replid,
+                    self.repl_offset.load(Ordering::Relaxed)
                 )
             }
             Role::Master => {
                 format!(
                     "# Replication\r\nrole:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n",
-                    self.replid, self.repl_offset
+                    self.replid,
+                    self.repl_offset.load(Ordering::Relaxed)
                 )
             }
         }
@@ -54,14 +59,14 @@ impl ReplicaConfig {
 #[derive(Debug, Clone)]
 pub struct State {
     map: Arc<Mutex<HashMap<BulkString, HashValue>>>,
-    replica_config: ReplicaConfig,
+    replica_config: Arc<Mutex<ReplicaConfig>>,
 }
 
 impl State {
     pub fn new(replicaof: bool, _master_config: Option<MasterConfig>) -> Self {
         let replica_config = ReplicaConfig {
             replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
-            repl_offset: 0,
+            repl_offset: AtomicUsize::new(0),
             role: match replicaof {
                 true => Role::Slave,
                 false => Role::Master,
@@ -70,16 +75,25 @@ impl State {
 
         Self {
             map: Arc::new(Mutex::new(HashMap::new())),
-            replica_config,
+            replica_config: Arc::new(Mutex::new(replica_config)),
         }
     }
+
+    pub fn increment_offset(&self, increment: usize) {
+        self.replica_config
+            .lock()
+            .unwrap()
+            .repl_offset
+            .fetch_add(increment, Ordering::Acquire);
+    }
+
     pub fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),
             RedisData::Info(info_arg) => match info_arg {
                 InfoArg::All => {
                     let mut infos = Vec::new();
-                    infos.push(self.replica_config.generate_response());
+                    infos.push(self.replica_config.lock().unwrap().generate_response());
                     format!(
                         "*{}\r\n{}",
                         infos.len(),
@@ -91,7 +105,8 @@ impl State {
                     )
                 }
                 InfoArg::Replication => {
-                    BulkString::encode(&self.replica_config.generate_response()).decode()
+                    BulkString::encode(&self.replica_config.lock().unwrap().generate_response())
+                        .decode()
                 }
             },
             RedisData::Set(key, value, config) => {
@@ -107,7 +122,10 @@ impl State {
             }
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
                 "?" => {
-                    let resp = format!("+FULLRESYNC {} 0\r\n", self.replica_config.replid);
+                    let resp = format!(
+                        "+FULLRESYNC {} 0\r\n",
+                        self.replica_config.lock().unwrap().replid
+                    );
                     resp.to_owned()
                 }
                 _ => anyhow::bail!("not supported"),
@@ -130,7 +148,19 @@ impl State {
             RedisData::ReplConf(cmd, _arg) => match cmd.data.to_lowercase().as_str() {
                 "listening-port" => "+OK\r\n".to_owned(),
                 "capa" => "+OK\r\n".to_owned(),
-                "getack" => "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".to_owned(),
+                "getack" => format!(
+                    "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n{}",
+                    BulkString::encode(
+                        &self
+                            .replica_config
+                            .lock()
+                            .unwrap()
+                            .repl_offset
+                            .load(Ordering::Relaxed)
+                            .to_string()
+                    )
+                    .decode()
+                ),
                 cmd => anyhow::bail!("invalid cmd {cmd}"),
             },
         };
