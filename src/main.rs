@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
                         };
 
                         if let RedisData::Wait(target_num_replicas, timeout) = redis_data {
-                            let getack = b"*3\r\n$8\r\nreplconf\r\n$6\r\ngetack\r\n$1\r\n*\r\n";
+                            let getack = b"*3\r\n$8\r\nreplconf\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
                             let _ = replica_tx.send(getack.to_vec());
                             let synced_replicas = state
                                 .count_synced_replicas(
