@@ -30,16 +30,19 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(address).await?;
 
     let (replica_tx, _rx) = broadcast::channel(100);
+    let (ack_tx, _rx) = broadcast::channel(100);
 
     loop {
         let (socket, _socket_addr) = listener.accept().await?;
         let mut state = state.clone();
         let socket = Arc::new(Mutex::new(socket));
         let replica_tx = replica_tx.clone();
+        let ack_tx = ack_tx.clone();
         tokio::spawn(async move {
             let mut buf = [0; 1024];
+            let mut task_socket = socket.lock().await;
             loop {
-                match socket.lock().await.read(&mut buf).await {
+                match task_socket.read(&mut buf).await {
                     Ok(n) => {
                         if n == 0 {
                             // connection closed
@@ -49,23 +52,42 @@ async fn main() -> anyhow::Result<()> {
                         let redis_data =
                             RedisData::parse(&request).expect("failed to parse request");
 
-                        let _ = match &redis_data {
-                            RedisData::Set(_, _, _) => replica_tx.send(buf[..n].to_vec()),
-                            _ => Ok(0),
+                        match &redis_data {
+                            RedisData::Set(_, _, _) => {
+                                let _ = replica_tx.send(buf[..n].to_vec());
+                            }
+                            RedisData::ReplConf(cmd, arg) => {
+                                if let "ack" = cmd.data.to_lowercase().as_str() {
+                                    let offset: usize =
+                                        arg.data.parse().expect("failed to parse ack offset");
+                                    let _ = ack_tx.send(offset);
+                                }
+                            }
+                            _ => (),
                         };
 
-                        if let RedisData::Wait(num_replicas, timeout) = redis_data {
+                        if let RedisData::Wait(target_num_replicas, timeout) = redis_data {
                             let getack = b"*3\r\n$8\r\nreplconf\r\n$6\r\ngetack\r\n$1\r\n*\r\n";
                             let _ = replica_tx.send(getack.to_vec());
+                            let synced_replicas = state
+                                .count_synced_replicas(
+                                    target_num_replicas,
+                                    timeout,
+                                    ack_tx.subscribe(),
+                                )
+                                .await
+                                .expect("failed get synced replica count");
+
+                            let response = format!(":{}\r\n", synced_replicas);
+                            let _ = task_socket.write_all(response.as_bytes()).await;
                         } else {
                             let response = state
                                 .handle_response(&redis_data)
                                 .expect("failed to generate response");
-                            let mut socket_write = socket.lock().await;
-                            socket_write.write_all(response.as_bytes()).await.unwrap();
+                            task_socket.write_all(response.as_bytes()).await.unwrap();
                             if let RedisData::Psync(_, _) = redis_data {
                                 let rdb = state.replica_request().unwrap();
-                                let _ = socket_write.write_all(&rdb).await;
+                                let _ = task_socket.write_all(&rdb).await;
                                 state.increment_num_replicas();
                                 let rx = replica_tx.subscribe();
                                 let socket = socket.clone();

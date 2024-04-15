@@ -4,10 +4,12 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use bytes::BytesMut;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use tokio::{sync::broadcast::Receiver, time::timeout};
 
 use crate::resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData, SetConfig};
 
@@ -101,6 +103,59 @@ impl State {
             .num_replicas
             .fetch_add(1, Ordering::Acquire);
     }
+
+    pub fn replica_count(&self) -> usize {
+        self.replica_config
+            .lock()
+            .unwrap()
+            .num_replicas
+            .load(Ordering::Relaxed)
+    }
+
+    pub fn offset(&self) -> usize {
+        self.replica_config
+            .lock()
+            .unwrap()
+            .repl_offset
+            .load(Ordering::Relaxed)
+    }
+
+    pub async fn count_synced_replicas(
+        &self,
+        target_num_replicas: BulkString,
+        timeout_duration: BulkString,
+        mut rx: Receiver<usize>,
+    ) -> anyhow::Result<usize> {
+        let connected_replicas = self.replica_count();
+        let primary_offset = self.offset();
+        if primary_offset == 0 {
+            return Ok(connected_replicas);
+        }
+        let target_num_replicas: usize = target_num_replicas.data.parse()?;
+        let target_count = target_num_replicas.min(connected_replicas);
+        let timeout_duration = {
+            let timeout_duration: u64 = timeout_duration.data.parse()?;
+            Duration::from_millis(timeout_duration)
+        };
+        let mut synced_replicas = 0;
+        while let Ok(res) = timeout(timeout_duration, rx.recv()).await {
+            match res {
+                Ok(offset) => {
+                    if offset >= primary_offset {
+                        synced_replicas += 1;
+                    }
+                    if synced_replicas >= target_count {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("error getting offset from replica due to {e:?}")
+                }
+            }
+        }
+        Ok(synced_replicas)
+    }
+
     pub fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),

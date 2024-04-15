@@ -37,7 +37,6 @@ pub fn load_config() -> anyhow::Result<Config> {
         Some(p) => p,
         None => "6379".to_string(),
     };
-    let address = format!("127.0.0.1:{port}");
 
     let master_config = if let (Some(host), Some(port)) = (master_host, master_port) {
         Some(MasterConfig { host, port })
