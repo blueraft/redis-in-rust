@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -124,7 +125,7 @@ impl State {
         &self,
         target_num_replicas: BulkString,
         timeout_duration: BulkString,
-        mut rx: Receiver<usize>,
+        mut rx: Receiver<(usize, SocketAddr)>,
     ) -> anyhow::Result<usize> {
         let connected_replicas = self.replica_count();
         let primary_offset = self.offset();
@@ -142,8 +143,8 @@ impl State {
         let mut synced_replicas = 0;
         while let Ok(res) = timeout(timeout_duration, rx.recv()).await {
             match res {
-                Ok(offset) => {
-                    println!("replica_offset: {offset}");
+                Ok((offset, socket_addr)) => {
+                    println!("replica_offset: {offset} from {socket_addr}");
                     if offset >= primary_offset {
                         synced_replicas += 1;
                     }
@@ -228,6 +229,7 @@ impl State {
             RedisData::ReplConf(cmd, _arg) => match cmd.data.to_lowercase().as_str() {
                 "listening-port" => "+OK\r\n".to_owned(),
                 "capa" => "+OK\r\n".to_owned(),
+                "ack" => "".to_owned(),
                 "getack" => format!(
                     "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n{}",
                     BulkString::encode(

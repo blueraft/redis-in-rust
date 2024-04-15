@@ -16,6 +16,7 @@ async fn main() -> anyhow::Result<()> {
     } = load_config()?;
 
     let address = format!("127.0.0.1:{port}");
+    println!("main address: {address}");
     let state = State::new(replicaof, master_config.clone());
     if let Some(config) = &master_config {
         let state = state.clone();
@@ -29,13 +30,14 @@ async fn main() -> anyhow::Result<()> {
     let (ack_tx, _rx) = broadcast::channel(100);
 
     loop {
-        let (socket, _socket_addr) = listener.accept().await?;
+        let (socket, socket_addr) = listener.accept().await?;
         let (client_tx, client_rx) = mpsc::channel::<Vec<u8>>(100);
         let mut state = state.clone();
         let (mut reader, writer) = socket.into_split();
         let replica_tx = replica_tx.clone();
         let ack_tx = ack_tx.clone();
         let master_config = master_config.clone();
+        println!("got connection from {socket_addr:?}");
         tokio::spawn(async move { send_write_to_client(client_rx, writer).await });
         tokio::spawn(async move {
             let mut buf = [0; 1024];
@@ -47,18 +49,24 @@ async fn main() -> anyhow::Result<()> {
                             return;
                         }
                         let request = String::from_utf8_lossy(&buf[..n]);
+                        println!("got request {request}");
                         let redis_data =
                             RedisData::parse(&request).expect("failed to parse request");
 
                         match &redis_data {
                             RedisData::Set(_, _, _) => {
                                 let _ = replica_tx.send(buf[..n].to_vec());
+                                if master_config.is_none() {
+                                    println!("Incrementing primary by {n}");
+                                    state.increment_offset(n);
+                                };
                             }
                             RedisData::ReplConf(cmd, arg) => {
                                 if let "ack" = cmd.data.to_lowercase().as_str() {
                                     let offset: usize =
                                         arg.data.parse().expect("failed to parse ack offset");
-                                    let _ = ack_tx.send(offset);
+                                    println!("sending {offset} from {socket_addr}");
+                                    let _ = ack_tx.send((offset, socket_addr));
                                 }
                             }
                             _ => (),
@@ -67,22 +75,21 @@ async fn main() -> anyhow::Result<()> {
                         if let RedisData::Wait(target_num_replicas, timeout) = redis_data {
                             let getack = b"*3\r\n$8\r\nreplconf\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
                             let _ = replica_tx.send(getack.to_vec());
+                            let rx = ack_tx.subscribe();
                             let synced_replicas = state
-                                .count_synced_replicas(
-                                    target_num_replicas,
-                                    timeout,
-                                    ack_tx.subscribe(),
-                                )
+                                .count_synced_replicas(target_num_replicas, timeout, rx)
                                 .await
                                 .expect("failed get synced replica count");
-
                             let response = format!(":{}\r\n", synced_replicas);
                             let _ = client_tx.send(response.as_bytes().to_vec()).await;
                         } else {
+                            // TODO: improve response handling
                             let response = state
                                 .handle_response(&redis_data)
                                 .expect("failed to generate response");
-                            client_tx.send(response.as_bytes().to_vec()).await.unwrap();
+                            if !response.is_empty() {
+                                client_tx.send(response.as_bytes().to_vec()).await.unwrap();
+                            }
                             if let RedisData::Psync(_, _) = redis_data {
                                 let rdb = state.replica_request().unwrap();
                                 client_tx.send(rdb.to_vec()).await.unwrap();
@@ -94,9 +101,6 @@ async fn main() -> anyhow::Result<()> {
                                 });
                             };
                         }
-                        if master_config.is_none() {
-                            state.increment_offset(n);
-                        };
                     }
                     Err(e) => {
                         eprintln!("failed to read from socket; err = {:?}", e);

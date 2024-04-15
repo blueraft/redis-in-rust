@@ -31,6 +31,9 @@ pub async fn initiate_replica_connection(
             if n == 0 {
                 return Ok(());
             }
+
+            let request = String::from_utf8_lossy(&buf[..n]);
+            println!("replica got request {request}");
             let replconf1 = b"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n";
             stream.write_all(replconf1).await.unwrap();
             let replconf2 = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
@@ -49,6 +52,8 @@ pub async fn initiate_replica_connection(
 
         Err(_) => todo!(),
     }
+    println!("initialization complete");
+
     loop {
         match stream.read(&mut buf).await {
             Ok(n) => {
@@ -59,6 +64,9 @@ pub async fn initiate_replica_connection(
                 let request = String::from_utf8_lossy(&buf[..n]);
                 let re = Regex::new(r"\*\d+\r\n").unwrap();
                 for request in re.split(&request) {
+                    if request.is_empty() {
+                        continue;
+                    }
                     match RedisData::parse(request) {
                         Ok(redis_data) => {
                             let response = state
@@ -79,7 +87,9 @@ pub async fn initiate_replica_connection(
                                 request.split('$').collect::<Vec<&str>>().len(),
                                 request
                             );
-                            state.increment_offset(total_req.as_bytes().len());
+                            let n = total_req.as_bytes().len();
+                            state.increment_offset(n);
+                            println!("Incrementing replica by {n}");
                         }
                         Err(e) => {
                             eprintln!("failed to parse request {request:?}; err = {e:?}");
