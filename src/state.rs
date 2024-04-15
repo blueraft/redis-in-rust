@@ -143,6 +143,7 @@ impl State {
         while let Ok(res) = timeout(timeout_duration, rx.recv()).await {
             match res {
                 Ok(offset) => {
+                    println!("replica_offset: {offset}");
                     if offset >= primary_offset {
                         synced_replicas += 1;
                     }

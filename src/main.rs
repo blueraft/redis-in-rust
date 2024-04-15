@@ -17,8 +17,9 @@ async fn main() -> anyhow::Result<()> {
 
     let address = format!("127.0.0.1:{port}");
     let state = State::new(replicaof, master_config.clone());
-    if let Some(config) = master_config {
+    if let Some(config) = &master_config {
         let state = state.clone();
+        let config = config.clone();
         tokio::spawn(async move { initiate_replica_connection(state, config).await });
     };
 
@@ -34,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
         let (mut reader, writer) = socket.into_split();
         let replica_tx = replica_tx.clone();
         let ack_tx = ack_tx.clone();
+        let master_config = master_config.clone();
         tokio::spawn(async move { send_write_to_client(client_rx, writer).await });
         tokio::spawn(async move {
             let mut buf = [0; 1024];
@@ -92,7 +94,9 @@ async fn main() -> anyhow::Result<()> {
                                 });
                             };
                         }
-                        state.increment_offset(n);
+                        if master_config.is_none() {
+                            state.increment_offset(n);
+                        };
                     }
                     Err(e) => {
                         eprintln!("failed to read from socket; err = {:?}", e);
