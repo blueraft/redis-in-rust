@@ -1,14 +1,12 @@
-use std::sync::Arc;
-
 use redis_starter_rust::{
     config::{load_config, Config},
-    replica::{initiate_replica_connection, send_write_to_replica},
+    replica::{initiate_replica_connection, send_write_to_client, send_write_to_replica},
     resp::RedisData,
     state::State,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::Mutex,
+    sync::mpsc,
 };
 use tokio::{net::TcpListener, sync::broadcast};
 
@@ -34,15 +32,16 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         let (socket, _socket_addr) = listener.accept().await?;
+        let (client_tx, client_rx) = mpsc::channel::<Vec<u8>>(100);
         let mut state = state.clone();
-        let socket = Arc::new(Mutex::new(socket));
+        let (mut reader, writer) = socket.into_split();
         let replica_tx = replica_tx.clone();
         let ack_tx = ack_tx.clone();
+        tokio::spawn(async move { send_write_to_client(client_rx, writer).await });
         tokio::spawn(async move {
             let mut buf = [0; 1024];
-            let mut task_socket = socket.lock().await;
             loop {
-                match task_socket.read(&mut buf).await {
+                match reader.read(&mut buf).await {
                     Ok(n) => {
                         if n == 0 {
                             // connection closed
@@ -79,21 +78,21 @@ async fn main() -> anyhow::Result<()> {
                                 .expect("failed get synced replica count");
 
                             let response = format!(":{}\r\n", synced_replicas);
-                            let _ = task_socket.write_all(response.as_bytes()).await;
+                            let _ = client_tx.send(response.as_bytes().to_vec()).await;
                         } else {
                             let response = state
                                 .handle_response(&redis_data)
                                 .expect("failed to generate response");
-                            task_socket.write_all(response.as_bytes()).await.unwrap();
+                            client_tx.send(response.as_bytes().to_vec()).await.unwrap();
                             if let RedisData::Psync(_, _) = redis_data {
                                 let rdb = state.replica_request().unwrap();
-                                let _ = task_socket.write_all(&rdb).await;
+                                client_tx.send(rdb.to_vec()).await.unwrap();
                                 state.increment_num_replicas();
-                                let rx = replica_tx.subscribe();
-                                let socket = socket.clone();
-                                tokio::spawn(
-                                    async move { send_write_to_replica(rx, socket).await },
-                                );
+                                let client_tx = client_tx.clone();
+                                let replica_rx = replica_tx.subscribe();
+                                tokio::spawn(async move {
+                                    send_write_to_replica(replica_rx, client_tx).await
+                                });
                             };
                         }
                     }
