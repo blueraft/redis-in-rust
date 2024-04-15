@@ -128,6 +128,8 @@ impl State {
     ) -> anyhow::Result<usize> {
         let connected_replicas = self.replica_count();
         let primary_offset = self.offset();
+        println!("connected replicas: {connected_replicas}");
+        println!("primary offset: {primary_offset}");
         if primary_offset == 0 {
             return Ok(connected_replicas);
         }

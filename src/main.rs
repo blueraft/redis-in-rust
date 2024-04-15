@@ -4,10 +4,7 @@ use redis_starter_rust::{
     resp::RedisData,
     state::State,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::mpsc,
-};
+use tokio::{io::AsyncReadExt, sync::mpsc};
 use tokio::{net::TcpListener, sync::broadcast};
 
 #[tokio::main]
@@ -95,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
                                 });
                             };
                         }
+                        state.increment_offset(n);
                     }
                     Err(e) => {
                         eprintln!("failed to read from socket; err = {:?}", e);
