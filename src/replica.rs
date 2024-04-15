@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use regex::Regex;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::broadcast::Receiver,
+    sync::{broadcast::Receiver, Mutex},
 };
 
 use crate::{
@@ -98,10 +100,10 @@ pub async fn initiate_replica_connection(
 /// Send `SET` requests from primary to replicas
 pub async fn send_write_to_replica(
     mut rx: Receiver<Vec<u8>>,
-    mut socket: TcpStream,
+    socket: Arc<Mutex<TcpStream>>,
 ) -> anyhow::Result<()> {
     while let Ok(msg) = rx.recv().await {
-        socket.write_all(&msg).await?;
+        socket.lock().await.write_all(&msg).await?;
     }
     Ok(())
 }
