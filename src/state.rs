@@ -12,7 +12,10 @@ use bytes::BytesMut;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use tokio::{sync::broadcast::Receiver, time::timeout};
 
-use crate::resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData, SetConfig};
+use crate::{
+    config::DatabaseConfig,
+    resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData, SetConfig},
+};
 
 #[derive(Debug)]
 struct HashValue {
@@ -65,10 +68,15 @@ impl ReplicaConfig {
 pub struct State {
     map: Arc<Mutex<HashMap<BulkString, HashValue>>>,
     replica_config: Arc<Mutex<ReplicaConfig>>,
+    db_config: Option<DatabaseConfig>,
 }
 
 impl State {
-    pub fn new(replicaof: bool, _master_config: Option<MasterConfig>) -> Self {
+    pub fn new(
+        replicaof: bool,
+        _master_config: Option<MasterConfig>,
+        db_config: Option<DatabaseConfig>,
+    ) -> Self {
         let replica_config = ReplicaConfig {
             replid: thread_rng()
                 .sample_iter(&Alphanumeric)
@@ -86,6 +94,7 @@ impl State {
         Self {
             map: Arc::new(Mutex::new(HashMap::new())),
             replica_config: Arc::new(Mutex::new(replica_config)),
+            db_config,
         }
     }
 
@@ -226,6 +235,26 @@ impl State {
                 }
             }
             RedisData::Echo(data) => data.decode(),
+            RedisData::Config(cmd, arg) => match cmd.data.to_lowercase().as_str() {
+                "get" => match arg.data.to_lowercase().as_str() {
+                    "dir" => {
+                        anyhow::ensure!(self.db_config.is_some(), "No db config available");
+                        let dir = self.db_config.clone().unwrap().dir;
+                        format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
+                    }
+                    "dbfilename" => {
+                        anyhow::ensure!(self.db_config.is_some(), "No db config available");
+                        let dbfilename = self.db_config.clone().unwrap().dbfilename;
+                        format!(
+                            "*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n",
+                            dbfilename.len(),
+                            dbfilename
+                        )
+                    }
+                    arg => anyhow::bail!("invalid cmd {arg}"),
+                },
+                cmd => anyhow::bail!("invalid cmd {cmd}"),
+            },
             RedisData::ReplConf(cmd, _arg) => match cmd.data.to_lowercase().as_str() {
                 "listening-port" => "+OK\r\n".to_owned(),
                 "capa" => "+OK\r\n".to_owned(),
@@ -261,7 +290,7 @@ impl State {
 
 impl Default for State {
     fn default() -> Self {
-        Self::new(false, None)
+        Self::new(false, None, None)
     }
 }
 

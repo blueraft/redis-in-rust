@@ -13,11 +13,12 @@ async fn main() -> anyhow::Result<()> {
         master_config,
         port,
         replicaof,
+        db_config,
     } = load_config()?;
 
     let address = format!("127.0.0.1:{port}");
     println!("main address: {address}");
-    let state = State::new(replicaof, master_config.clone());
+    let state = State::new(replicaof, master_config.clone(), db_config);
     if let Some(config) = &master_config {
         let state = state.clone();
         let config = config.clone();

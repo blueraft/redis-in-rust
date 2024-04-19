@@ -2,6 +2,7 @@ use clap::{command, Parser};
 
 use crate::state::MasterConfig;
 
+#[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub dir: String,
     pub dbfilename: String,

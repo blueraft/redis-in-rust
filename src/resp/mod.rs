@@ -33,6 +33,7 @@ pub enum RedisData {
     ReplConf(BulkString, BulkString),
     Psync(BulkString, BulkString),
     Wait(BulkString, BulkString),
+    Config(BulkString, BulkString),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,6 +63,9 @@ impl RedisData {
             }
             Command::Replconf if values.len() >= 3 => {
                 Self::ReplConf(values[1].clone(), values[2].clone())
+            }
+            Command::Config if values.len() >= 3 => {
+                Self::Config(values[1].clone(), values[2].clone())
             }
             Command::Wait if values.len() >= 3 => Self::Wait(values[1].clone(), values[2].clone()),
             Command::Psync if values.len() >= 3 => {
