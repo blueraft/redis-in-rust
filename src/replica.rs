@@ -69,13 +69,13 @@ pub async fn initiate_replica_connection(
                     }
                     match RedisData::parse(request) {
                         Ok(redis_data) => {
-                            let response = state
-                                .handle_response(&redis_data)
-                                .expect("failed to generate response");
                             // after handshake is complete, only the replconf provides responses to
                             // primary
                             match redis_data {
                                 RedisData::ReplConf(_, _) => {
+                                    let response = state
+                                        .handle_response(&redis_data)
+                                        .expect("failed to generate response");
                                     stream.write_all(response.as_bytes()).await
                                 }
                                 _ => Ok(()),
