@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     net::SocketAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -13,15 +12,9 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use tokio::{sync::broadcast::Receiver, time::timeout};
 
 use crate::{
-    config::DatabaseConfig,
-    resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData, SetConfig},
+    db::Database,
+    resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData},
 };
-
-#[derive(Debug)]
-struct HashValue {
-    value: BulkString,
-    config: SetConfig,
-}
 
 #[derive(Debug)]
 pub struct ReplicaConfig {
@@ -66,17 +59,12 @@ impl ReplicaConfig {
 
 #[derive(Debug, Clone)]
 pub struct State {
-    map: Arc<Mutex<HashMap<BulkString, HashValue>>>,
     replica_config: Arc<Mutex<ReplicaConfig>>,
-    db_config: Option<DatabaseConfig>,
+    db: Arc<Mutex<Database>>,
 }
 
 impl State {
-    pub fn new(
-        replicaof: bool,
-        _master_config: Option<MasterConfig>,
-        db_config: Option<DatabaseConfig>,
-    ) -> Self {
+    pub fn new(replicaof: bool, db: Database) -> Self {
         let replica_config = ReplicaConfig {
             replid: thread_rng()
                 .sample_iter(&Alphanumeric)
@@ -92,9 +80,8 @@ impl State {
         };
 
         Self {
-            map: Arc::new(Mutex::new(HashMap::new())),
             replica_config: Arc::new(Mutex::new(replica_config)),
-            db_config,
+            db: Arc::new(Mutex::new(db)),
         }
     }
 
@@ -192,14 +179,10 @@ impl State {
                 }
             },
             RedisData::Set(key, value, config) => {
-                let mut map = self.map.lock().unwrap();
-                map.insert(
-                    key.to_owned(),
-                    HashValue {
-                        value: value.to_owned(),
-                        config: config.to_owned(),
-                    },
-                );
+                self.db
+                    .lock()
+                    .unwrap()
+                    .set(key.to_owned(), value.to_owned(), config.to_owned());
                 "+OK\r\n".to_owned()
             }
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
@@ -221,36 +204,12 @@ impl State {
                     .load(Ordering::Relaxed);
                 format!(":{}\r\n", num_replica)
             }
-            RedisData::Get(key) => {
-                let mut map = self.map.lock().unwrap();
-                match map.get(key) {
-                    Some(hash_value) => match hash_value.config.has_expired() {
-                        true => {
-                            map.remove(key);
-                            "$-1\r\n".to_owned()
-                        }
-                        false => hash_value.value.decode(),
-                    },
-                    None => "$-1\r\n".to_owned(),
-                }
-            }
+            RedisData::Get(key) => self.db.lock().unwrap().get(key),
             RedisData::Echo(data) => data.decode(),
             RedisData::Config(cmd, arg) => match cmd.data.to_lowercase().as_str() {
                 "get" => match arg.data.to_lowercase().as_str() {
-                    "dir" => {
-                        anyhow::ensure!(self.db_config.is_some(), "No db config available");
-                        let dir = self.db_config.clone().unwrap().dir;
-                        format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
-                    }
-                    "dbfilename" => {
-                        anyhow::ensure!(self.db_config.is_some(), "No db config available");
-                        let dbfilename = self.db_config.clone().unwrap().dbfilename;
-                        format!(
-                            "*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n",
-                            dbfilename.len(),
-                            dbfilename
-                        )
-                    }
+                    "dir" => self.db.lock().unwrap().dir()?,
+                    "dbfilename" => self.db.lock().unwrap().dbfilename()?,
                     arg => anyhow::bail!("invalid cmd {arg}"),
                 },
                 cmd => anyhow::bail!("invalid cmd {cmd}"),
@@ -290,7 +249,8 @@ impl State {
 
 impl Default for State {
     fn default() -> Self {
-        Self::new(false, None, None)
+        let db = Database::initialize(None);
+        Self::new(false, db)
     }
 }
 

@@ -1,5 +1,6 @@
 use redis_starter_rust::{
     config::{load_config, Config},
+    db::Database,
     replica::{initiate_replica_connection, send_write_to_client, send_write_to_replica},
     resp::RedisData,
     state::State,
@@ -18,7 +19,8 @@ async fn main() -> anyhow::Result<()> {
 
     let address = format!("127.0.0.1:{port}");
     println!("main address: {address}");
-    let state = State::new(replicaof, master_config.clone(), db_config);
+    let db = Database::initialize(db_config);
+    let state = State::new(replicaof, db);
     if let Some(config) = &master_config {
         let state = state.clone();
         let config = config.clone();
