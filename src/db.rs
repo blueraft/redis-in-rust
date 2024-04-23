@@ -5,7 +5,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{config::DatabaseConfig, resp::bulk_string::BulkString};
+use crate::{
+    config::DatabaseConfig,
+    resp::{bulk_string::BulkString, rdb::Rdb},
+};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SetConfig {
@@ -36,9 +39,9 @@ impl SetConfig {
 }
 
 #[derive(Debug)]
-struct HashValue {
-    value: BulkString,
-    config: SetConfig,
+pub(crate) struct HashValue {
+    pub(crate) value: BulkString,
+    pub(crate) config: SetConfig,
 }
 
 #[derive(Debug)]
@@ -49,21 +52,19 @@ pub struct Database {
 
 impl Database {
     pub fn initialize(config: Option<DatabaseConfig>) -> Self {
+        let mut map = HashMap::new();
         let Some(config) = config else {
-            return Self {
-                config,
-                map: HashMap::new(),
-            };
+            return Self { config, map };
         };
 
         let path = Path::new(&config.dir).join(&config.dbfilename);
-        let map = match File::open(&path) {
-            Ok(_f) => HashMap::new(),
-            Err(_) => {
-                println!("DB file not found in path {path:?}, creating new DB");
-                HashMap::new()
-            }
-        };
+        if let Ok(f) = File::open(&path) {
+            let mut rdb = Rdb::new(f);
+            rdb.read_rdb_to_map(&mut map)
+                .expect("Failed to read rdb dump");
+        } else {
+            println!("The {path:?} file was not found");
+        }
 
         Self {
             config: Some(config),
