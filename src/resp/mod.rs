@@ -20,6 +20,7 @@ pub enum RedisData {
     Psync(BulkString, BulkString),
     Wait(BulkString, BulkString),
     Config(BulkString, BulkString),
+    Keys(BulkString),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -61,6 +62,8 @@ impl RedisData {
                 let config = SetConfig::new(values.get(3), values.get(4))?;
                 Self::Set(values[1].clone(), values[2].clone(), config)
             }
+            Command::Keys if !values.is_empty() => Self::Keys(values[1].clone()),
+
             _ => anyhow::bail!("incorrect {values:?} for {command:?}",),
         };
         Ok(redis_data)

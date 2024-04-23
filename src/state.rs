@@ -185,6 +185,8 @@ impl State {
                     .set(key.to_owned(), value.to_owned(), config.to_owned());
                 "+OK\r\n".to_owned()
             }
+            RedisData::Keys(_value) => self.db.lock().unwrap().keys(),
+
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
                 "?" => {
                     let resp = format!(

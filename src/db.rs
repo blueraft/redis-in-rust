@@ -76,6 +76,11 @@ impl Database {
         self.map.insert(key, HashValue { value, config });
     }
 
+    pub fn keys(&self) -> String {
+        let keys: Vec<String> = self.map.keys().map(|x| x.decode()).collect();
+        format!("*{}\r\n{}\r\n", keys.len(), keys.join(""))
+    }
+
     pub fn get(&mut self, key: &BulkString) -> String {
         match self.map.get(key) {
             Some(hash_value) => match hash_value.config.has_expired() {
