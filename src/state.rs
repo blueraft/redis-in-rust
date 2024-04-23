@@ -13,7 +13,7 @@ use tokio::{sync::broadcast::Receiver, time::timeout};
 
 use crate::{
     db::Database,
-    resp::{bulk_string::BulkString, rdb::Rdb, InfoArg, RedisData},
+    resp::{bulk_string::BulkString, InfoArg, RedisData},
 };
 
 #[derive(Debug)]
@@ -186,7 +186,6 @@ impl State {
                 "+OK\r\n".to_owned()
             }
             RedisData::Keys(_value) => self.db.lock().unwrap().keys(),
-
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
                 "?" => {
                     let resp = format!(
