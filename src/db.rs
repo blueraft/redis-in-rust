@@ -30,6 +30,14 @@ impl SetConfig {
         };
         Ok(config)
     }
+
+    pub fn from_ms(time_in_ms: u64) -> Self {
+        Self {
+            old_time: Instant::now(),
+            expiry_duration: Some(Duration::from_millis(time_in_ms)),
+        }
+    }
+
     pub fn has_expired(&self) -> bool {
         match self.expiry_duration {
             Some(expiry_duration) => self.old_time.elapsed() > expiry_duration,
@@ -39,28 +47,28 @@ impl SetConfig {
 }
 
 #[derive(Debug)]
-pub(crate) struct HashValue {
-    pub(crate) value: BulkString,
-    pub(crate) config: SetConfig,
-}
-
-#[derive(Debug)]
 pub struct Database {
     config: Option<DatabaseConfig>,
-    map: HashMap<BulkString, HashValue>,
+    value_map: HashMap<BulkString, BulkString>,
+    expiry_map: HashMap<BulkString, SetConfig>,
 }
 
 impl Database {
     pub fn initialize(config: Option<DatabaseConfig>) -> Self {
-        let mut map = HashMap::new();
+        let mut value_map = HashMap::new();
+        let mut expiry_map = HashMap::new();
         let Some(config) = config else {
-            return Self { config, map };
+            return Self {
+                config,
+                value_map,
+                expiry_map,
+            };
         };
 
         let path = Path::new(&config.dir).join(&config.dbfilename);
         if let Ok(f) = File::open(&path) {
             let mut rdb = Rdb::new(f);
-            rdb.read_rdb_to_map(&mut map)
+            rdb.read_rdb_to_map(&mut value_map, &mut expiry_map)
                 .expect("Failed to read rdb dump");
         } else {
             println!("The {path:?} file was not found");
@@ -68,29 +76,37 @@ impl Database {
 
         Self {
             config: Some(config),
-            map,
+            value_map,
+            expiry_map,
         }
     }
 
     pub fn set(&mut self, key: BulkString, value: BulkString, config: SetConfig) {
-        self.map.insert(key, HashValue { value, config });
+        self.value_map.insert(key.clone(), value);
+        self.expiry_map.insert(key, config);
     }
 
     pub fn keys(&self) -> String {
-        let keys: Vec<String> = self.map.keys().map(|x| x.decode()).collect();
+        let keys: Vec<String> = self.value_map.keys().map(|x| x.decode()).collect();
         format!("*{}\r\n{}\r\n", keys.len(), keys.join(""))
     }
 
     pub fn get(&mut self, key: &BulkString) -> String {
-        match self.map.get(key) {
-            Some(hash_value) => match hash_value.config.has_expired() {
+        match (self.expiry_map.get(key), self.value_map.get(key)) {
+            (Some(config), Some(value)) => match config.has_expired() {
                 true => {
-                    self.map.remove(key);
+                    println!("{key:?} value expired {config:?}");
+                    self.value_map.remove(key);
+                    self.expiry_map.remove(key);
                     "$-1\r\n".to_owned()
                 }
-                false => hash_value.value.decode(),
+                false => value.decode(),
             },
-            None => "$-1\r\n".to_owned(),
+            (None, Some(value)) => value.decode(),
+            (_config, _value) => {
+                dbg!(_config, _value);
+                "$-1\r\n".to_owned()
+            }
         }
     }
 

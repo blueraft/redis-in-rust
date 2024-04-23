@@ -6,10 +6,7 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 
-use crate::{
-    db::{HashValue, SetConfig},
-    resp::bulk_string::BulkString,
-};
+use crate::{db::SetConfig, resp::bulk_string::BulkString};
 
 #[derive(Debug)]
 pub(crate) struct Rdb<R> {
@@ -19,8 +16,8 @@ pub(crate) struct Rdb<R> {
 pub mod op_code {
     pub const AUX: u8 = 250;
     pub const RESIZEDB: u8 = 251;
-    pub const _EXPIRETIME_MS: u8 = 252;
-    pub const _EXPIRETIME: u8 = 253;
+    pub const EXPIRETIME_MS: u8 = 252;
+    pub const EXPIRETIME: u8 = 253;
     pub const SELECTDB: u8 = 254;
     pub const EOF: u8 = 255;
 }
@@ -66,7 +63,8 @@ impl<R: Read> Rdb<R> {
 
     pub fn read_rdb_to_map(
         &mut self,
-        map: &mut HashMap<BulkString, HashValue>,
+        value_map: &mut HashMap<BulkString, BulkString>,
+        expiry_map: &mut HashMap<BulkString, SetConfig>,
     ) -> anyhow::Result<()> {
         self.read_header()?;
         loop {
@@ -83,6 +81,26 @@ impl<R: Read> Rdb<R> {
                     let (_db_size, _) = self.read_length_with_encoding()?;
                     let (_expires_size, _) = self.read_length_with_encoding()?;
                 }
+                op_code::EXPIRETIME_MS => {
+                    self.buffer.resize(8, 0);
+                    self.inner.read_exact(&mut self.buffer)?;
+                    let expiry = self.buffer.get_u64_le();
+                    let key: BulkString = self.read_blob()?.into();
+                    let value: BulkString = self.read_blob()?.into();
+                    println!("Saved key {key:?} and value {value:?}");
+                    expiry_map.insert(key.clone(), SetConfig::from_ms(expiry));
+                    value_map.insert(key, value);
+                }
+                op_code::EXPIRETIME => {
+                    self.buffer.resize(8, 0);
+                    self.inner.read_exact(&mut self.buffer)?;
+                    let expiry = self.buffer.get_u64_le();
+                    let key: BulkString = self.read_blob()?.into();
+                    let value: BulkString = self.read_blob()?.into();
+                    println!("Saved key {key:?} and value {value:?} and expiry {expiry}s");
+                    expiry_map.insert(key.clone(), SetConfig::from_ms(expiry * 1000));
+                    value_map.insert(key, value);
+                }
                 op_code::EOF => {
                     break;
                 }
@@ -90,13 +108,7 @@ impl<R: Read> Rdb<R> {
                     let key = self.read_blob()?;
                     let value = self.read_blob()?;
                     println!("Saved key {key:?} and value {value:?}");
-                    map.insert(
-                        key.into(),
-                        HashValue {
-                            value: value.into(),
-                            config: SetConfig::new(None, None)?,
-                        },
-                    );
+                    value_map.insert(key.into(), value.into());
                 }
             }
         }
