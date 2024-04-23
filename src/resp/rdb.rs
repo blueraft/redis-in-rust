@@ -2,8 +2,10 @@
 use std::{
     collections::HashMap,
     io::{BufReader, Read},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::Context;
 use bytes::{Buf, BytesMut};
 
 use crate::{db::SetConfig, resp::bulk_string::BulkString};
@@ -68,7 +70,7 @@ impl<R: Read> Rdb<R> {
     ) -> anyhow::Result<()> {
         self.read_header()?;
         loop {
-            let op = self.next()?;
+            let op = self.next().context("read next byte")?;
             match op {
                 op_code::AUX => {
                     let _key = self.read_blob()?;
@@ -85,20 +87,23 @@ impl<R: Read> Rdb<R> {
                     self.buffer.resize(8, 0);
                     self.inner.read_exact(&mut self.buffer)?;
                     let expiry = self.buffer.get_u64_le();
+                    let exp = UNIX_EPOCH + Duration::from_millis(expiry);
+                    let _value_type = self.read_blob()?;
                     let key: BulkString = self.read_blob()?.into();
                     let value: BulkString = self.read_blob()?.into();
-                    println!("Saved key {key:?} and value {value:?}");
-                    expiry_map.insert(key.clone(), SetConfig::from_ms(expiry));
+                    println!("Saved key {key:?} and value {value:?} and expiry {expiry}ms");
+                    expiry_map.insert(key.clone(), SetConfig::from_expiration(exp));
                     value_map.insert(key, value);
                 }
                 op_code::EXPIRETIME => {
-                    self.buffer.resize(8, 0);
+                    self.buffer.resize(4, 0);
                     self.inner.read_exact(&mut self.buffer)?;
                     let expiry = self.buffer.get_u64_le();
+                    let exp = UNIX_EPOCH + Duration::from_millis(expiry);
                     let key: BulkString = self.read_blob()?.into();
                     let value: BulkString = self.read_blob()?.into();
                     println!("Saved key {key:?} and value {value:?} and expiry {expiry}s");
-                    expiry_map.insert(key.clone(), SetConfig::from_ms(expiry * 1000));
+                    expiry_map.insert(key.clone(), SetConfig::from_expiration(exp));
                     value_map.insert(key, value);
                 }
                 op_code::EOF => {
@@ -129,7 +134,9 @@ impl<R: Read> Rdb<R> {
     }
 
     fn read_blob(&mut self) -> anyhow::Result<StringEncoding> {
-        let (length, is_encoded) = self.read_length_with_encoding()?;
+        let (length, is_encoded) = self
+            .read_length_with_encoding()
+            .context("read length with encoding")?;
 
         if is_encoded {
             let result = match length {

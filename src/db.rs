@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     path::Path,
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
 };
 
 use crate::{
@@ -12,35 +12,32 @@ use crate::{
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SetConfig {
-    old_time: Instant,
-    expiry_duration: Option<Duration>,
+    expiration: Option<SystemTime>,
 }
 
 impl SetConfig {
     pub fn new(px: Option<&BulkString>, time: Option<&BulkString>) -> anyhow::Result<Self> {
-        let mut config = SetConfig {
-            old_time: Instant::now(),
-            expiry_duration: None,
-        };
+        let mut config = SetConfig { expiration: None };
         if let (Some(px), Some(time)) = (px, time) {
             if px.data.to_lowercase().as_str() == "px" {
                 let expiry_duration: u64 = time.data.parse()?;
-                config.expiry_duration = Some(Duration::from_millis(expiry_duration));
+                config.expiration =
+                    Some(SystemTime::now() + Duration::from_millis(expiry_duration));
             }
         };
         Ok(config)
     }
 
-    pub fn from_ms(time_in_ms: u64) -> Self {
+    pub fn from_expiration(expiration: SystemTime) -> Self {
         Self {
-            old_time: Instant::now(),
-            expiry_duration: Some(Duration::from_millis(time_in_ms)),
+            expiration: Some(expiration),
         }
     }
 
     pub fn has_expired(&self) -> bool {
-        match self.expiry_duration {
-            Some(expiry_duration) => self.old_time.elapsed() > expiry_duration,
+        println!("checking for expiry, {:?}", self,);
+        match self.expiration {
+            Some(expiration) => expiration <= SystemTime::now(),
             None => false,
         }
     }
