@@ -206,6 +206,7 @@ impl State {
                 format!(":{}\r\n", num_replica)
             }
             RedisData::Get(key) => self.db.lock().unwrap().get(key),
+            RedisData::Type(key) => self.db.lock().unwrap().ty(key),
             RedisData::Echo(data) => data.decode(),
             RedisData::Config(cmd, arg) => match cmd.data.to_lowercase().as_str() {
                 "get" => match arg.data.to_lowercase().as_str() {

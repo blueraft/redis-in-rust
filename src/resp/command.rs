@@ -10,6 +10,7 @@ pub enum Command {
     Wait,
     Config,
     Keys,
+    Type
 }
 
 impl TryFrom<&str> for Command {
@@ -27,6 +28,7 @@ impl TryFrom<&str> for Command {
             "wait" => Ok(Command::Wait),
             "config" => Ok(Command::Config),
             "keys" => Ok(Command::Keys),
+            "type" => Ok(Command::Type),
             _ => Err(anyhow::anyhow!("Invalid command {value}")),
         }
     }

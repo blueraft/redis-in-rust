@@ -12,6 +12,7 @@ pub(crate) mod simple_string;
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedisData {
     Get(BulkString),
+    Type(BulkString),
     Echo(BulkString),
     Set(BulkString, BulkString, SetConfig),
     Info(InfoArg),
@@ -41,6 +42,7 @@ impl RedisData {
         let redis_data = match command {
             Command::Echo if values.len() == 2 => Self::Echo(values[1].clone()),
             Command::Get if values.len() == 2 => Self::Get(values[1].clone()),
+            Command::Type if values.len() == 2 => Self::Type(values[1].clone()),
             Command::Ping => Self::Ping,
             Command::Info => {
                 if values.len() > 1 {

@@ -107,6 +107,25 @@ impl Database {
         }
     }
 
+    pub fn ty(&mut self, key: &BulkString) -> String {
+        match (self.expiry_map.get(key), self.value_map.get(key)) {
+            (Some(config), Some(_)) => match config.has_expired() {
+                true => {
+                    println!("{key:?} value expired {config:?}");
+                    self.value_map.remove(key);
+                    self.expiry_map.remove(key);
+                    "+none\r\n".to_owned()
+                }
+                false => "+string\r\n".to_owned(),
+            },
+            (None, Some(_)) => "+string\r\n".to_owned(),
+            (_config, _value) => {
+                dbg!(_config, _value);
+                "+none\r\n".to_owned()
+            }
+        }
+    }
+
     pub fn dir(&self) -> anyhow::Result<String> {
         match &self.config {
             Some(config) => {
