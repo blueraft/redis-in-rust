@@ -114,9 +114,9 @@ impl<R: Read> Rdb<R> {
                 }
                 _ => {
                     let key = self.read_blob()?;
-                    let value = self.read_blob()?;
+                    let value = self.read_blob()?.into();
                     println!("Saved key {key:?} and value {value:?}");
-                    value_map.insert(key.into(), DataType::String(value.into()));
+                    value_map.insert(key.into(), DataType::String(value));
                 }
             }
         }

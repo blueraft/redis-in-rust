@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fs::File,
     path::Path,
     time::{Duration, SystemTime},
@@ -9,6 +9,7 @@ use crate::{
     config::DatabaseConfig,
     resp::{bulk_string::BulkString, rdb::Rdb},
 };
+use thiserror::Error;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SetConfig {
@@ -52,7 +53,55 @@ pub struct StreamData {
 #[derive(Debug)]
 pub enum DataType {
     String(BulkString),
+    Stream(VecDeque<StreamData>),
+}
+
+#[derive(Debug)]
+pub enum InputData {
+    String(BulkString),
     Stream(StreamData),
+}
+
+#[derive(Error, Debug)]
+pub enum EntryIdError {
+    #[error(
+        "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n"
+    )]
+    NotAscendingError,
+    #[error("-ERR The ID specified in XADD must be greater than 0-0\r\n")]
+    InvalidStartError,
+    #[error("Parsing stream data")]
+    ParsingError,
+}
+
+impl StreamData {
+    pub fn valid_entry_id(&self, other: Option<&StreamData>) -> Result<bool, EntryIdError> {
+        let (ms_time, seq_num) = self.get_time_and_seq_num(&self.id.data)?;
+        if ms_time <= 0 && seq_num <= 0 {
+            return Err(EntryIdError::InvalidStartError);
+        }
+
+        let res = match other {
+            Some(other) => {
+                let (other_ms_time, other_seq_num) = self.get_time_and_seq_num(&other.id.data)?;
+                if ms_time > other_ms_time || (ms_time == other_ms_time && seq_num > other_seq_num)
+                {
+                    true
+                } else {
+                    return Err(EntryIdError::NotAscendingError);
+                }
+            }
+            None => true,
+        };
+        Ok(res)
+    }
+
+    fn get_time_and_seq_num(&self, data: &str) -> Result<(i32, i32), EntryIdError> {
+        let (time, num) = data.split_once('-').expect("invalid explicit entry id");
+        let time: i32 = time.parse().map_err(|_| EntryIdError::ParsingError)?;
+        let num: i32 = num.parse().map_err(|_| EntryIdError::ParsingError)?;
+        Ok((time, num))
+    }
 }
 
 #[derive(Debug)]
@@ -90,11 +139,37 @@ impl Database {
         }
     }
 
-    pub fn set(&mut self, key: BulkString, value: DataType, config: Option<SetConfig>) {
-        self.value_map.insert(key.clone(), value);
+    pub fn set(
+        &mut self,
+        key: BulkString,
+        value: InputData,
+        config: Option<SetConfig>,
+    ) -> Result<(), EntryIdError> {
+        let stored_value = self.value_map.get_mut(&key);
+        match value {
+            InputData::String(val) => {
+                self.value_map.insert(key.clone(), DataType::String(val));
+            }
+            InputData::Stream(val) => match stored_value {
+                Some(stored_steam_values) => match stored_steam_values {
+                    DataType::Stream(stored_steam_values) => {
+                        let last_value = stored_steam_values.back();
+                        val.valid_entry_id(last_value)?;
+                        stored_steam_values.push_back(val);
+                    }
+                    DataType::String(_) => panic!("previous stored value was a string"),
+                },
+                None => {
+                    let mut v = VecDeque::new();
+                    v.push_back(val);
+                    self.value_map.insert(key.clone(), DataType::Stream(v));
+                }
+            },
+        };
         if let Some(config) = config {
-            self.expiry_map.insert(key, config);
-        }
+            self.expiry_map.insert(key.clone(), config);
+        };
+        Ok(())
     }
 
     pub fn keys(&self) -> String {

@@ -12,7 +12,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use tokio::{sync::broadcast::Receiver, time::timeout};
 
 use crate::{
-    db::{DataType, Database, StreamData},
+    db::{Database, InputData, StreamData},
     resp::{bulk_string::BulkString, InfoArg, RedisData},
 };
 
@@ -181,22 +181,25 @@ impl State {
             RedisData::Set(key, value, config) => {
                 self.db.lock().unwrap().set(
                     key.to_owned(),
-                    DataType::String(value.to_owned()),
+                    InputData::String(value.to_owned()),
                     Some(config.to_owned()),
-                );
+                )?;
                 "+OK\r\n".to_owned()
             }
 
             RedisData::Xadd(key, id, map) => {
-                self.db.lock().unwrap().set(
+                let result = self.db.lock().unwrap().set(
                     key.to_owned(),
-                    DataType::Stream(StreamData {
+                    InputData::Stream(StreamData {
                         id: id.to_owned(),
                         map: map.to_owned(),
                     }),
                     None,
                 );
-                id.decode()
+                match result {
+                    Ok(()) => id.decode(),
+                    Err(e) => e.to_string(),
+                }
             }
             RedisData::Keys(_value) => self.db.lock().unwrap().keys(),
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
