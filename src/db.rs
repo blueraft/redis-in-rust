@@ -44,9 +44,21 @@ impl SetConfig {
 }
 
 #[derive(Debug)]
+pub struct StreamData {
+    pub id: BulkString,
+    pub map: HashMap<BulkString, BulkString>,
+}
+
+#[derive(Debug)]
+pub enum DataType {
+    String(BulkString),
+    Stream(StreamData),
+}
+
+#[derive(Debug)]
 pub struct Database {
     config: Option<DatabaseConfig>,
-    value_map: HashMap<BulkString, BulkString>,
+    value_map: HashMap<BulkString, DataType>,
     expiry_map: HashMap<BulkString, SetConfig>,
 }
 
@@ -78,9 +90,11 @@ impl Database {
         }
     }
 
-    pub fn set(&mut self, key: BulkString, value: BulkString, config: SetConfig) {
+    pub fn set(&mut self, key: BulkString, value: DataType, config: Option<SetConfig>) {
         self.value_map.insert(key.clone(), value);
-        self.expiry_map.insert(key, config);
+        if let Some(config) = config {
+            self.expiry_map.insert(key, config);
+        }
     }
 
     pub fn keys(&self) -> String {
@@ -97,9 +111,15 @@ impl Database {
                     self.expiry_map.remove(key);
                     "$-1\r\n".to_owned()
                 }
-                false => value.decode(),
+                false => match value {
+                    DataType::String(v) => v.decode(),
+                    DataType::Stream(_) => unimplemented!(),
+                },
             },
-            (None, Some(value)) => value.decode(),
+            (None, Some(value)) => match value {
+                DataType::String(v) => v.decode(),
+                DataType::Stream(_) => unimplemented!(),
+            },
             (_config, _value) => {
                 dbg!(_config, _value);
                 "$-1\r\n".to_owned()
@@ -109,16 +129,23 @@ impl Database {
 
     pub fn ty(&mut self, key: &BulkString) -> String {
         match (self.expiry_map.get(key), self.value_map.get(key)) {
-            (Some(config), Some(_)) => match config.has_expired() {
+            (Some(config), Some(value)) => match config.has_expired() {
                 true => {
                     println!("{key:?} value expired {config:?}");
                     self.value_map.remove(key);
                     self.expiry_map.remove(key);
                     "+none\r\n".to_owned()
                 }
-                false => "+string\r\n".to_owned(),
+                false => match value {
+                    DataType::String(_) => "+string\r\n".to_owned(),
+                    DataType::Stream(_) => "+stream\r\n".to_owned(),
+                },
             },
-            (None, Some(_)) => "+string\r\n".to_owned(),
+            (None, Some(value)) => match value {
+                DataType::String(_) => "+string\r\n".to_owned(),
+                DataType::Stream(_) => "+stream\r\n".to_owned(),
+            },
+
             (_config, _value) => {
                 dbg!(_config, _value);
                 "+none\r\n".to_owned()

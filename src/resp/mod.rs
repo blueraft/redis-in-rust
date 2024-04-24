@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bulk_string::BulkString;
 
 use command::Command;
@@ -22,6 +24,7 @@ pub enum RedisData {
     Wait(BulkString, BulkString),
     Config(BulkString, BulkString),
     Keys(BulkString),
+    Xadd(BulkString, BulkString, HashMap<BulkString, BulkString>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -63,6 +66,15 @@ impl RedisData {
             Command::Set if values.len() >= 3 => {
                 let config = SetConfig::new(values.get(3), values.get(4))?;
                 Self::Set(values[1].clone(), values[2].clone(), config)
+            }
+            Command::Xadd if values.len() >= 3 => {
+                let key = values[1].clone();
+                let id = values[2].clone(); // stream id
+                let mut map = HashMap::new();
+                for pair in values[3..].chunks(2) {
+                    map.insert(pair[0].to_owned(), pair[1].to_owned());
+                }
+                Self::Xadd(key, id, map)
             }
             Command::Keys if !values.is_empty() => Self::Keys(values[1].clone()),
 

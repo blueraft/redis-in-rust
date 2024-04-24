@@ -8,7 +8,10 @@ use std::{
 use anyhow::Context;
 use bytes::{Buf, BytesMut};
 
-use crate::{db::SetConfig, resp::bulk_string::BulkString};
+use crate::{
+    db::{DataType, SetConfig},
+    resp::bulk_string::BulkString,
+};
 
 #[derive(Debug)]
 pub(crate) struct Rdb<R> {
@@ -65,7 +68,7 @@ impl<R: Read> Rdb<R> {
 
     pub fn read_rdb_to_map(
         &mut self,
-        value_map: &mut HashMap<BulkString, BulkString>,
+        value_map: &mut HashMap<BulkString, DataType>,
         expiry_map: &mut HashMap<BulkString, SetConfig>,
     ) -> anyhow::Result<()> {
         self.read_header()?;
@@ -93,7 +96,7 @@ impl<R: Read> Rdb<R> {
                     let value: BulkString = self.read_blob()?.into();
                     println!("Saved key {key:?} and value {value:?} and expiry {expiry}ms");
                     expiry_map.insert(key.clone(), SetConfig::from_expiration(exp));
-                    value_map.insert(key, value);
+                    value_map.insert(key, DataType::String(value));
                 }
                 op_code::EXPIRETIME => {
                     self.buffer.resize(4, 0);
@@ -104,7 +107,7 @@ impl<R: Read> Rdb<R> {
                     let value: BulkString = self.read_blob()?.into();
                     println!("Saved key {key:?} and value {value:?} and expiry {expiry}s");
                     expiry_map.insert(key.clone(), SetConfig::from_expiration(exp));
-                    value_map.insert(key, value);
+                    value_map.insert(key, DataType::String(value));
                 }
                 op_code::EOF => {
                     break;
@@ -113,7 +116,7 @@ impl<R: Read> Rdb<R> {
                     let key = self.read_blob()?;
                     let value = self.read_blob()?;
                     println!("Saved key {key:?} and value {value:?}");
-                    value_map.insert(key.into(), value.into());
+                    value_map.insert(key.into(), DataType::String(value.into()));
                 }
             }
         }
