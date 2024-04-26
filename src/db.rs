@@ -75,15 +75,22 @@ pub enum EntryIdError {
 }
 
 impl StreamData {
-    pub fn valid_entry_id(&self, other: Option<&StreamData>) -> Result<bool, EntryIdError> {
-        let (ms_time, seq_num) = self.get_time_and_seq_num(&self.id.data)?;
+    pub fn valid_entry_id(&mut self, other: Option<&StreamData>) -> Result<bool, EntryIdError> {
+        let data_contains_star = self.id.data.contains('*');
+        let (ms_time, seq_num) = self.get_time_and_seq_num(&self.id.data, other)?;
+        if data_contains_star {
+            // the seq number returned by get_time_and_seq_num would be updated to reflect a new
+            // seq
+            self.id = BulkString::encode(&format!("{ms_time}-{seq_num}"));
+        }
         if ms_time <= 0 && seq_num <= 0 {
             return Err(EntryIdError::InvalidStartError);
         }
 
         let res = match other {
             Some(other) => {
-                let (other_ms_time, other_seq_num) = self.get_time_and_seq_num(&other.id.data)?;
+                let (other_ms_time, other_seq_num) =
+                    self.get_time_and_seq_num(&other.id.data, None)?;
                 if ms_time > other_ms_time || (ms_time == other_ms_time && seq_num > other_seq_num)
                 {
                     true
@@ -96,10 +103,35 @@ impl StreamData {
         Ok(res)
     }
 
-    fn get_time_and_seq_num(&self, data: &str) -> Result<(i32, i32), EntryIdError> {
+    fn get_time_and_seq_num(
+        &self,
+        data: &str,
+        other: Option<&StreamData>,
+    ) -> Result<(i32, i32), EntryIdError> {
         let (time, num) = data.split_once('-').expect("invalid explicit entry id");
         let time: i32 = time.parse().map_err(|_| EntryIdError::ParsingError)?;
-        let num: i32 = num.parse().map_err(|_| EntryIdError::ParsingError)?;
+        let num = match num {
+            "*" => match other {
+                Some(other) => {
+                    let (other_time, other_num) = other
+                        .id
+                        .data
+                        .split_once('-')
+                        .expect("invalid explicit entry id");
+                    let other_num: i32 =
+                        other_num.parse().map_err(|_| EntryIdError::ParsingError)?;
+                    let other_time: i32 =
+                        other_time.parse().map_err(|_| EntryIdError::ParsingError)?;
+                    if other_time == time {
+                        other_num + 1
+                    } else {
+                        0
+                    }
+                }
+                None => 1,
+            },
+            _ => num.parse().map_err(|_| EntryIdError::ParsingError)?,
+        };
         Ok((time, num))
     }
 }
@@ -144,32 +176,41 @@ impl Database {
         key: BulkString,
         value: InputData,
         config: Option<SetConfig>,
-    ) -> Result<(), EntryIdError> {
+    ) -> Result<BulkString, EntryIdError> {
         let stored_value = self.value_map.get_mut(&key);
-        match value {
+        let val = match value {
             InputData::String(val) => {
-                self.value_map.insert(key.clone(), DataType::String(val));
+                self.value_map
+                    .insert(key.clone(), DataType::String(val.clone()));
+                val
             }
-            InputData::Stream(val) => match stored_value {
+            InputData::Stream(mut val) => match stored_value {
                 Some(stored_steam_values) => match stored_steam_values {
                     DataType::Stream(stored_steam_values) => {
                         let last_value = stored_steam_values.back();
                         val.valid_entry_id(last_value)?;
+                        let id = val.id.clone();
                         stored_steam_values.push_back(val);
+                        id
                     }
                     DataType::String(_) => panic!("previous stored value was a string"),
                 },
                 None => {
                     let mut v = VecDeque::new();
+                    let key_id = val.id.data.replace('*', "1");
+                    val.id = BulkString::encode(&key_id);
+                    let id = val.id.clone();
                     v.push_back(val);
                     self.value_map.insert(key.clone(), DataType::Stream(v));
+                    id
                 }
             },
         };
         if let Some(config) = config {
             self.expiry_map.insert(key.clone(), config);
         };
-        Ok(())
+
+        Ok(val)
     }
 
     pub fn keys(&self) -> String {

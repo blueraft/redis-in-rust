@@ -197,7 +197,7 @@ impl State {
                     None,
                 );
                 match result {
-                    Ok(()) => id.decode(),
+                    Ok(id) => id.decode(),
                     Err(e) => e.to_string(),
                 }
             }

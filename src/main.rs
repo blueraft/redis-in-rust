@@ -52,9 +52,9 @@ async fn main() -> anyhow::Result<()> {
                             return;
                         }
                         let request = String::from_utf8_lossy(&buf[..n]);
-                        println!("got request {request}");
                         let redis_data =
                             RedisData::parse(&request).expect("failed to parse request");
+                        println!("got data {redis_data:?}");
 
                         match &redis_data {
                             RedisData::Set(_, _, _) => {
