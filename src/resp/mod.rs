@@ -69,7 +69,13 @@ impl RedisData {
             }
             Command::Xadd if values.len() >= 3 => {
                 let key = values[1].clone();
-                let id = values[2].clone(); // stream id
+                let mut id = values[2].clone(); // stream id
+                if id.data.as_str() == "*" {
+                    // when * is used with the XADD command, Redis auto-generates a unique auto-incrementing ID
+                    let timestamp = std::time::UNIX_EPOCH.elapsed().unwrap().as_millis();
+                    let ms_timestamp = format!("{timestamp}-0");
+                    id = BulkString::encode(&ms_timestamp);
+                }
                 let mut map = HashMap::new();
                 for pair in values[3..].chunks(2) {
                     map.insert(pair[0].to_owned(), pair[1].to_owned());
