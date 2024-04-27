@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use bulk_string::BulkString;
 
 use command::Command;
+use indexmap::IndexMap;
 
 use crate::db::SetConfig;
 
@@ -24,7 +25,8 @@ pub enum RedisData {
     Wait(BulkString, BulkString),
     Config(BulkString, BulkString),
     Keys(BulkString),
-    Xadd(BulkString, BulkString, HashMap<BulkString, BulkString>),
+    Xadd(BulkString, BulkString, IndexMap<BulkString, BulkString>),
+    Xrange(BulkString, BulkString, BulkString),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -67,6 +69,10 @@ impl RedisData {
                 let config = SetConfig::new(values.get(3), values.get(4))?;
                 Self::Set(values[1].clone(), values[2].clone(), config)
             }
+            Command::Xrange if values.len() >= 4 => {
+                Self::Xrange(values[1].clone(), values[2].clone(), values[3].clone())
+            }
+
             Command::Xadd if values.len() >= 3 => {
                 let key = values[1].clone();
                 let mut id = values[2].clone(); // stream id
@@ -76,7 +82,7 @@ impl RedisData {
                     let ms_timestamp = format!("{timestamp}-0");
                     id = BulkString::encode(&ms_timestamp);
                 }
-                let mut map = HashMap::new();
+                let mut map = IndexMap::new();
                 for pair in values[3..].chunks(2) {
                     map.insert(pair[0].to_owned(), pair[1].to_owned());
                 }

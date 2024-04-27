@@ -9,6 +9,7 @@ use crate::{
     config::DatabaseConfig,
     resp::{bulk_string::BulkString, rdb::Rdb},
 };
+use indexmap::IndexMap;
 use thiserror::Error;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -44,16 +45,81 @@ impl SetConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StreamData {
     pub id: BulkString,
-    pub map: HashMap<BulkString, BulkString>,
+    pub map: IndexMap<BulkString, BulkString>,
 }
 
 #[derive(Debug)]
 pub enum DataType {
     String(BulkString),
     Stream(VecDeque<StreamData>),
+}
+
+enum SequencePosition {
+    Start,
+    End,
+}
+
+impl DataType {
+    fn xrange_split_values(
+        &self,
+        data: &str,
+        position: SequencePosition,
+    ) -> anyhow::Result<(i32, i32)> {
+        let values: Vec<i32> = data
+            .split_terminator('-')
+            .filter_map(|x| x.parse().ok())
+            .collect();
+        let empty_seq_value = match position {
+            SequencePosition::Start => 0,
+            SequencePosition::End => i32::MAX,
+        };
+        match values.len() {
+            1 => Ok((values[0], empty_seq_value)),
+            2 => Ok((values[0], values[1])),
+            _ => anyhow::bail!("Invalid x_range value: {data}"),
+        }
+    }
+
+    fn within_time_bounds(&self, value: &StreamData, start: (i32, i32), end: (i32, i32)) -> bool {
+        let (time, seq) = value
+            .get_time_and_seq_num(&value.id.data, None)
+            .expect("Invalid Id set for {value:?}");
+
+        (start.0 <= time && time <= end.0) && (start.1 <= seq && seq <= end.1)
+    }
+
+    fn stream_value_to_resp(&self, value: &StreamData) -> String {
+        let mut map_values = Vec::with_capacity(value.map.len());
+        for (k, v) in value.map.clone() {
+            map_values.push(k.decode());
+            map_values.push(v.decode());
+        }
+        format!(
+            "*2\r\n{}*{}\r\n{}",
+            value.id.decode(),
+            map_values.len(),
+            map_values.join("")
+        )
+    }
+
+    fn xrange(&self, start: &BulkString, end: &BulkString) -> anyhow::Result<String> {
+        let stream_data = match self {
+            DataType::String(_) => anyhow::bail!("Only use for stream data"),
+            DataType::Stream(val) => val,
+        };
+        let start = self.xrange_split_values(&start.data, SequencePosition::Start)?;
+        let end = self.xrange_split_values(&end.data, SequencePosition::End)?;
+        let result: Vec<String> = stream_data
+            .iter()
+            .filter(|x| self.within_time_bounds(x, start, end))
+            .map(|x| self.stream_value_to_resp(x))
+            .collect();
+        let resp_value = format!("*{}\r\n{}", result.len(), result.join(""));
+        Ok(resp_value)
+    }
 }
 
 #[derive(Debug)]
@@ -75,7 +141,7 @@ pub enum EntryIdError {
 }
 
 impl StreamData {
-    pub fn valid_entry_id(&mut self, other: Option<&StreamData>) -> Result<bool, EntryIdError> {
+    fn valid_entry_id(&mut self, other: Option<&StreamData>) -> Result<bool, EntryIdError> {
         let data_contains_star = self.id.data.contains('*');
         let (ms_time, seq_num) = self.get_time_and_seq_num(&self.id.data, other)?;
         if data_contains_star {
@@ -294,6 +360,18 @@ impl Database {
                 Ok(dbfilename)
             }
             None => anyhow::bail!("No db config available"),
+        }
+    }
+
+    pub fn xrange(
+        &self,
+        key: &BulkString,
+        start: &BulkString,
+        end: &BulkString,
+    ) -> anyhow::Result<String> {
+        match self.value_map.get(key) {
+            Some(value) => value.xrange(start, end),
+            None => anyhow::bail!("Stream value not set"),
         }
     }
 }

@@ -201,6 +201,12 @@ impl State {
                     Err(e) => e.to_string(),
                 }
             }
+            RedisData::Xrange(key, start, end) => {
+                match self.db.lock().unwrap().xrange(key, start, end) {
+                    Ok(res) => res,
+                    Err(e) => panic!("Failed to retrieve values due to {e}"),
+                }
+            }
             RedisData::Keys(_value) => self.db.lock().unwrap().keys(),
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
                 "?" => {
