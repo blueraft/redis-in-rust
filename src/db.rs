@@ -161,6 +161,10 @@ impl DataType {
             .map(|x| self.stream_value_to_resp(x))
             .collect();
 
+        if result.is_empty() {
+            anyhow::bail!("No response")
+        }
+
         let resp_value = format!(
             "*2\r\n{}*{}\r\n{}",
             key.decode(),
@@ -433,6 +437,10 @@ impl Database {
                     .and_then(|v| v.xread(key, start).ok())
             })
             .collect();
-        format!("*{}\r\n{}", resp_values.len(), resp_values.join(""))
+
+        match resp_values.len() {
+            0 => "$-1\r\n".to_string(),
+            n => format!("*{n}\r\n{}", resp_values.join("")),
+        }
     }
 }

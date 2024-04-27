@@ -71,6 +71,7 @@ pub async fn initiate_replica_connection(
                         Ok(redis_data) => {
                             let response = state
                                 .handle_response(&redis_data)
+                                .await
                                 .expect("failed to generate response");
                             // after handshake is complete, only the replconf provides responses to
                             // primary

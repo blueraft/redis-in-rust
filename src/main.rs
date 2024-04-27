@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
                             // TODO: improve response handling
                             let response = state
                                 .handle_response(&redis_data)
+                                .await
                                 .expect("failed to generate response");
                             if !response.is_empty() {
                                 client_tx.send(response.as_bytes().to_vec()).await.unwrap();
