@@ -110,8 +110,15 @@ impl DataType {
             DataType::String(_) => anyhow::bail!("Only use for stream data"),
             DataType::Stream(val) => val,
         };
-        let start = self.xrange_split_values(&start.data, SequencePosition::Start)?;
-        let end = self.xrange_split_values(&end.data, SequencePosition::End)?;
+        let start = match start.data.as_str() {
+            "-" => (0, 0),
+            data => self.xrange_split_values(data, SequencePosition::Start)?,
+        };
+        let end = match end.data.as_str() {
+            "-" => (i32::MAX, i32::MAX),
+            data => self.xrange_split_values(data, SequencePosition::End)?,
+        };
+
         let result: Vec<String> = stream_data
             .iter()
             .filter(|x| self.within_time_bounds(x, start, end))
