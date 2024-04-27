@@ -115,7 +115,7 @@ impl DataType {
             data => self.xrange_split_values(data, SequencePosition::Start)?,
         };
         let end = match end.data.as_str() {
-            "-" => (i32::MAX, i32::MAX),
+            "+" => (i32::MAX, i32::MAX),
             data => self.xrange_split_values(data, SequencePosition::End)?,
         };
 
