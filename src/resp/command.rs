@@ -12,6 +12,7 @@ pub enum Command {
     Keys,
     Xadd,
     Xrange,
+    Xread,
     Type,
 }
 
@@ -33,6 +34,7 @@ impl TryFrom<&str> for Command {
             "type" => Ok(Command::Type),
             "xadd" => Ok(Command::Xadd),
             "xrange" => Ok(Command::Xrange),
+            "xread" => Ok(Command::Xread),
             _ => Err(anyhow::anyhow!("Invalid command {value}")),
         }
     }

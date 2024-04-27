@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use bulk_string::BulkString;
 
 use command::Command;
@@ -27,6 +25,7 @@ pub enum RedisData {
     Keys(BulkString),
     Xadd(BulkString, BulkString, IndexMap<BulkString, BulkString>),
     Xrange(BulkString, BulkString, BulkString),
+    Xread(BulkString, BulkString, BulkString),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -72,7 +71,9 @@ impl RedisData {
             Command::Xrange if values.len() >= 4 => {
                 Self::Xrange(values[1].clone(), values[2].clone(), values[3].clone())
             }
-
+            Command::Xread if values.len() >= 4 => {
+                Self::Xread(values[1].clone(), values[2].clone(), values[3].clone())
+            }
             Command::Xadd if values.len() >= 3 => {
                 let key = values[1].clone();
                 let mut id = values[2].clone(); // stream id

@@ -91,6 +91,20 @@ impl DataType {
         (start.0 <= time && time <= end.0) && (start.1 <= seq && seq <= end.1)
     }
 
+    fn within_exclusive_time_bounds(
+        &self,
+        value: &StreamData,
+        start: (i32, i32),
+        end: (i32, i32),
+    ) -> bool {
+        let (time, seq) = value
+            .get_time_and_seq_num(&value.id.data, None)
+            .expect("Invalid Id set for {value:?}");
+
+        ((start.0 < time && time <= end.0) && (start.1 <= seq && seq <= end.1))
+            || ((start.0 <= time && time <= end.0) && (start.1 < seq && seq <= end.1))
+    }
+
     fn stream_value_to_resp(&self, value: &StreamData) -> String {
         let mut map_values = Vec::with_capacity(value.map.len());
         for (k, v) in value.map.clone() {
@@ -125,6 +139,34 @@ impl DataType {
             .map(|x| self.stream_value_to_resp(x))
             .collect();
         let resp_value = format!("*{}\r\n{}", result.len(), result.join(""));
+        Ok(resp_value)
+    }
+
+    fn xread(&self, key: &BulkString, start: &BulkString) -> anyhow::Result<String> {
+        let stream_data = match self {
+            DataType::String(_) => anyhow::bail!("Only use for stream data"),
+            DataType::Stream(val) => val,
+        };
+
+        let start = match start.data.as_str() {
+            "-" => (0, 0),
+            data => self.xrange_split_values(data, SequencePosition::Start)?,
+        };
+
+        let end = (i32::MAX, i32::MAX);
+
+        let result: Vec<String> = stream_data
+            .iter()
+            .filter(|x| self.within_exclusive_time_bounds(x, start, end))
+            .map(|x| self.stream_value_to_resp(x))
+            .collect();
+
+        let resp_value = format!(
+            "*1\r\n*2\r\n{}*{}\r\n{}",
+            key.decode(),
+            result.len(),
+            result.join("")
+        );
         Ok(resp_value)
     }
 }
@@ -378,6 +420,13 @@ impl Database {
     ) -> anyhow::Result<String> {
         match self.value_map.get(key) {
             Some(value) => value.xrange(start, end),
+            None => anyhow::bail!("Stream value not set"),
+        }
+    }
+
+    pub fn xread(&self, key: &BulkString, start: &BulkString) -> anyhow::Result<String> {
+        match self.value_map.get(key) {
+            Some(value) => value.xread(key, start),
             None => anyhow::bail!("Stream value not set"),
         }
     }
