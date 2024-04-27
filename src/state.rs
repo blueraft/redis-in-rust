@@ -207,13 +207,7 @@ impl State {
                     Err(e) => panic!("Failed to retrieve values due to {e}"),
                 }
             }
-            RedisData::Xread(_streams, key, start) => {
-                match self.db.lock().unwrap().xread(key, start) {
-                    Ok(res) => res,
-                    Err(e) => panic!("Failed to retrieve values due to {e}"),
-                }
-            }
-
+            RedisData::Xread(_streams, key_id_pairs) => self.db.lock().unwrap().xread(key_id_pairs),
             RedisData::Keys(_value) => self.db.lock().unwrap().keys(),
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
                 "?" => {

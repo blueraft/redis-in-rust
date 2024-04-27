@@ -162,7 +162,7 @@ impl DataType {
             .collect();
 
         let resp_value = format!(
-            "*1\r\n*2\r\n{}*{}\r\n{}",
+            "*2\r\n{}*{}\r\n{}",
             key.decode(),
             result.len(),
             result.join("")
@@ -424,10 +424,15 @@ impl Database {
         }
     }
 
-    pub fn xread(&self, key: &BulkString, start: &BulkString) -> anyhow::Result<String> {
-        match self.value_map.get(key) {
-            Some(value) => value.xread(key, start),
-            None => anyhow::bail!("Stream value not set"),
-        }
+    pub fn xread(&self, key_id_pairs: &[(BulkString, BulkString)]) -> String {
+        let resp_values: Vec<String> = key_id_pairs
+            .iter()
+            .flat_map(|(key, start)| {
+                self.value_map
+                    .get(key)
+                    .and_then(|v| v.xread(key, start).ok())
+            })
+            .collect();
+        format!("*{}\r\n{}", resp_values.len(), resp_values.join(""))
     }
 }
