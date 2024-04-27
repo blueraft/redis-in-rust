@@ -172,6 +172,20 @@ impl DataType {
         );
         Ok(resp_value)
     }
+
+    fn max_entry_timestamp(&self) -> anyhow::Result<BulkString> {
+        let stream_data = match self {
+            DataType::String(_) => anyhow::bail!("Only use for stream data"),
+            DataType::Stream(val) => val,
+        };
+
+        let res = match stream_data.back() {
+            Some(v) => v.id.clone(),
+            None => BulkString::encode("0-0"),
+        };
+
+        Ok(res)
+    }
 }
 
 #[derive(Debug)]
@@ -425,6 +439,30 @@ impl Database {
             Some(value) => value.xrange(start, end),
             None => anyhow::bail!("Stream value not set"),
         }
+    }
+
+    pub fn swap_and_fetch_max_id(
+        &self,
+        key_id_pairs: &[(BulkString, BulkString)],
+    ) -> Vec<(BulkString, BulkString)> {
+        key_id_pairs
+            .iter()
+            .flat_map(|(key, start)| {
+                dbg!(&start.data);
+                let start = if start.data.as_str() == "$" {
+                    match self.value_map.get(key) {
+                        Some(v) => v
+                            .max_entry_timestamp()
+                            .expect("Failed to find last entry time stamp"),
+                        None => BulkString::encode("0-0"),
+                    }
+                } else {
+                    start.to_owned()
+                };
+                dbg!(&key, &start);
+                Some((key.clone(), start))
+            })
+            .collect()
     }
 
     pub fn xread(&self, key_id_pairs: &[(BulkString, BulkString)]) -> String {

@@ -156,6 +156,13 @@ impl State {
         Ok(synced_replicas)
     }
 
+    pub fn swap_pairs(
+        &mut self,
+        pairs: &[(BulkString, BulkString)],
+    ) -> Vec<(BulkString, BulkString)> {
+        self.db.lock().unwrap().swap_and_fetch_max_id(pairs)
+    }
+
     pub fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),

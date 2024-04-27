@@ -25,6 +25,7 @@ pub enum RedisData {
     Keys(BulkString),
     Xadd(BulkString, BulkString, IndexMap<BulkString, BulkString>),
     Xrange(BulkString, BulkString, BulkString),
+    /// streams, (stream_key, sequence_id) pairs, block_duration
     Xread(BulkString, Vec<(BulkString, BulkString)>, Option<u64>),
 }
 
@@ -84,6 +85,11 @@ impl RedisData {
                     let id_i = key_i + num_stream_keys;
                     pairs.push((values[key_i].clone(), values[id_i].clone()));
                 }
+
+                if data.ends_with("$\r\n") {
+                    pairs.push((values[key_start_idx].clone(), BulkString::encode("$")))
+                }
+
                 Self::Xread(values[key_start_idx - 1].clone(), pairs, block_duration)
             }
             Command::Xadd if values.len() >= 3 => {

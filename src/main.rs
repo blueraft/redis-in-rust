@@ -63,6 +63,15 @@ async fn main() -> anyhow::Result<()> {
                             RedisData::parse(&request).expect("failed to parse request");
                         println!("got data {redis_data:?}");
 
+                        let redis_data =
+                            if let RedisData::Xread(stream, pairs, block_duration) = redis_data {
+                                // if the user requests blocking reads using $, we have to swap the
+                                // start time with the maximum ID
+                                RedisData::Xread(stream, state.swap_pairs(&pairs), block_duration)
+                            } else {
+                                redis_data
+                            };
+
                         match &redis_data {
                             RedisData::Set(_, _, _) => {
                                 let _ = replica_tx.send(buf[..n].to_vec());
