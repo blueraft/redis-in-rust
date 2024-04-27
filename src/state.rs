@@ -156,7 +156,7 @@ impl State {
         Ok(synced_replicas)
     }
 
-    pub async fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
+    pub fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
         let response = match redis_data {
             RedisData::Ping => "+PONG\r\n".to_owned(),
             RedisData::Info(info_arg) => match info_arg {
@@ -207,10 +207,7 @@ impl State {
                     Err(e) => panic!("Failed to retrieve values due to {e}"),
                 }
             }
-            RedisData::Xread(_streams, key_id_pairs, block_duration) => {
-                if let Some(duration) = block_duration {
-                    tokio::time::sleep(duration.clone()).await;
-                }
+            RedisData::Xread(_streams, key_id_pairs, _block_duration) => {
                 self.db.lock().unwrap().xread(key_id_pairs)
             }
             RedisData::Keys(_value) => self.db.lock().unwrap().keys(),

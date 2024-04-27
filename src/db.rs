@@ -37,7 +37,6 @@ impl SetConfig {
     }
 
     pub fn has_expired(&self) -> bool {
-        println!("checking for expiry, {:?}", self,);
         match self.expiration {
             Some(expiration) => expiration <= SystemTime::now(),
             None => false,
@@ -67,14 +66,14 @@ impl DataType {
         &self,
         data: &str,
         position: SequencePosition,
-    ) -> anyhow::Result<(i32, i32)> {
-        let values: Vec<i32> = data
+    ) -> anyhow::Result<(i64, i64)> {
+        let values: Vec<i64> = data
             .split_terminator('-')
             .filter_map(|x| x.parse().ok())
             .collect();
         let empty_seq_value = match position {
             SequencePosition::Start => 0,
-            SequencePosition::End => i32::MAX,
+            SequencePosition::End => i64::MAX,
         };
         match values.len() {
             1 => Ok((values[0], empty_seq_value)),
@@ -83,7 +82,7 @@ impl DataType {
         }
     }
 
-    fn within_time_bounds(&self, value: &StreamData, start: (i32, i32), end: (i32, i32)) -> bool {
+    fn within_time_bounds(&self, value: &StreamData, start: (i64, i64), end: (i64, i64)) -> bool {
         let (time, seq) = value
             .get_time_and_seq_num(&value.id.data, None)
             .expect("Invalid Id set for {value:?}");
@@ -94,8 +93,8 @@ impl DataType {
     fn within_exclusive_time_bounds(
         &self,
         value: &StreamData,
-        start: (i32, i32),
-        end: (i32, i32),
+        start: (i64, i64),
+        end: (i64, i64),
     ) -> bool {
         let (time, seq) = value
             .get_time_and_seq_num(&value.id.data, None)
@@ -129,7 +128,7 @@ impl DataType {
             data => self.xrange_split_values(data, SequencePosition::Start)?,
         };
         let end = match end.data.as_str() {
-            "+" => (i32::MAX, i32::MAX),
+            "+" => (i64::MAX, i64::MAX),
             data => self.xrange_split_values(data, SequencePosition::End)?,
         };
 
@@ -153,7 +152,7 @@ impl DataType {
             data => self.xrange_split_values(data, SequencePosition::Start)?,
         };
 
-        let end = (i32::MAX, i32::MAX);
+        let end = (i64::MAX, i64::MAX);
 
         let result: Vec<String> = stream_data
             .iter()
@@ -226,9 +225,9 @@ impl StreamData {
         &self,
         data: &str,
         other: Option<&StreamData>,
-    ) -> Result<(i32, i32), EntryIdError> {
+    ) -> Result<(i64, i64), EntryIdError> {
         let (time, num) = data.split_once('-').expect("invalid explicit entry id");
-        let time: i32 = time.parse().map_err(|_| EntryIdError::ParsingError)?;
+        let time: i64 = time.parse().map_err(|_| EntryIdError::ParsingError)?;
         let num = match num {
             "*" => match other {
                 Some(other) => {
@@ -237,9 +236,9 @@ impl StreamData {
                         .data
                         .split_once('-')
                         .expect("invalid explicit entry id");
-                    let other_num: i32 =
+                    let other_num: i64 =
                         other_num.parse().map_err(|_| EntryIdError::ParsingError)?;
-                    let other_time: i32 =
+                    let other_time: i64 =
                         other_time.parse().map_err(|_| EntryIdError::ParsingError)?;
                     if other_time == time {
                         other_num + 1
@@ -249,7 +248,7 @@ impl StreamData {
                 }
                 None => 1,
             },
-            _ => num.parse().map_err(|_| EntryIdError::ParsingError)?,
+            n => n.parse().map_err(|_| EntryIdError::ParsingError)?,
         };
         Ok((time, num))
     }

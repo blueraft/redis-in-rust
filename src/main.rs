@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use redis_starter_rust::{
     config::{load_config, Config},
     db::Database,
@@ -5,7 +7,10 @@ use redis_starter_rust::{
     resp::RedisData,
     state::State,
 };
-use tokio::{io::AsyncReadExt, sync::mpsc};
+use tokio::{
+    io::AsyncReadExt,
+    sync::{mpsc, watch},
+};
 use tokio::{net::TcpListener, sync::broadcast};
 
 #[tokio::main]
@@ -30,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(address).await?;
 
     let (replica_tx, _rx) = broadcast::channel(100);
+    let (xadd_tx, _rx) = watch::channel("hello");
     let (ack_tx, _rx) = broadcast::channel(100);
 
     loop {
@@ -39,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         let (mut reader, writer) = socket.into_split();
         let replica_tx = replica_tx.clone();
         let ack_tx = ack_tx.clone();
+        let xadd_tx = xadd_tx.clone();
         let master_config = master_config.clone();
         println!("got connection from {socket_addr:?}");
         tokio::spawn(async move { send_write_to_client(client_rx, writer).await });
@@ -72,6 +79,21 @@ async fn main() -> anyhow::Result<()> {
                                     let _ = ack_tx.send((offset, socket_addr));
                                 }
                             }
+                            RedisData::Xread(_, _, Some(duration)) => {
+                                if *duration == 0 {
+                                    let mut xadd_rx = xadd_tx.subscribe();
+                                    match xadd_rx.changed().await {
+                                        Ok(_) => {
+                                            println!("data set in stream");
+                                        }
+                                        Err(_) => panic!("failed to send"),
+                                    }
+                                } else {
+                                    let duration = Duration::from_millis(*duration);
+                                    tokio::time::sleep(duration).await;
+                                }
+                            }
+
                             _ => (),
                         };
 
@@ -89,10 +111,12 @@ async fn main() -> anyhow::Result<()> {
                             // TODO: improve response handling
                             let response = state
                                 .handle_response(&redis_data)
-                                .await
                                 .expect("failed to generate response");
                             if !response.is_empty() {
                                 client_tx.send(response.as_bytes().to_vec()).await.unwrap();
+                            }
+                            if let RedisData::Xadd(_, _, _) = redis_data {
+                                xadd_tx.send("xadd").expect("failed to send xadd ack");
                             }
                             if let RedisData::Psync(_, _) = redis_data {
                                 let rdb = state.replica_request().unwrap();

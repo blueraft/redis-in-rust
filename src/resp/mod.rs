@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bulk_string::BulkString;
 
 use command::Command;
@@ -27,7 +25,7 @@ pub enum RedisData {
     Keys(BulkString),
     Xadd(BulkString, BulkString, IndexMap<BulkString, BulkString>),
     Xrange(BulkString, BulkString, BulkString),
-    Xread(BulkString, Vec<(BulkString, BulkString)>, Option<Duration>),
+    Xread(BulkString, Vec<(BulkString, BulkString)>, Option<u64>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -76,7 +74,7 @@ impl RedisData {
             Command::Xread if values.len() >= 4 => {
                 let (key_start_idx, block_duration) = if values[1].data.as_str() == "block" {
                     let millis: u64 = values[2].data.parse()?;
-                    (4, Some(Duration::from_millis(millis)))
+                    (4, Some(millis))
                 } else {
                     (2, None)
                 };
