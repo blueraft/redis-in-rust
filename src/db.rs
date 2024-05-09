@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fs::File,
     path::Path,
     time::{Duration, SystemTime},
@@ -9,6 +9,7 @@ use crate::{
     config::DatabaseConfig,
     resp::{bulk_string::BulkString, rdb::Rdb},
 };
+use dashmap::DashMap;
 use indexmap::IndexMap;
 use thiserror::Error;
 
@@ -271,26 +272,26 @@ impl StreamData {
 #[derive(Debug)]
 pub struct Database {
     config: Option<DatabaseConfig>,
-    value_map: HashMap<BulkString, DataType>,
-    expiry_map: HashMap<BulkString, SetConfig>,
+    values: DashMap<BulkString, DataValue>,
+}
+
+#[derive(Debug)]
+pub(crate) struct DataValue {
+    pub(crate) value: DataType,
+    pub(crate) expiry: Option<SetConfig>,
 }
 
 impl Database {
     pub fn initialize(config: Option<DatabaseConfig>) -> Self {
-        let mut value_map = HashMap::new();
-        let mut expiry_map = HashMap::new();
+        let mut values = DashMap::new();
         let Some(config) = config else {
-            return Self {
-                config,
-                value_map,
-                expiry_map,
-            };
+            return Self { config, values };
         };
 
         let path = Path::new(&config.dir).join(&config.dbfilename);
         if let Ok(f) = File::open(&path) {
             let mut rdb = Rdb::new(f);
-            rdb.read_rdb_to_map(&mut value_map, &mut expiry_map)
+            rdb.read_rdb_to_map(&mut values)
                 .expect("Failed to read rdb dump");
         } else {
             println!("The {path:?} file was not found");
@@ -298,31 +299,32 @@ impl Database {
 
         Self {
             config: Some(config),
-            value_map,
-            expiry_map,
+            values,
         }
     }
 
     pub fn set(
-        &mut self,
+        &self,
         key: BulkString,
         value: InputData,
         config: Option<SetConfig>,
     ) -> Result<BulkString, EntryIdError> {
-        let stored_value = self.value_map.get_mut(&key);
         let val = match value {
             InputData::String(val) => {
-                self.value_map
-                    .insert(key.clone(), DataType::String(val.clone()));
+                let data_value = DataValue {
+                    value: DataType::String(val.clone()),
+                    expiry: config,
+                };
+                self.values.insert(key.clone(), data_value);
                 val
             }
-            InputData::Stream(mut val) => match stored_value {
-                Some(stored_steam_values) => match stored_steam_values {
-                    DataType::Stream(stored_steam_values) => {
-                        let last_value = stored_steam_values.back();
+            InputData::Stream(mut val) => match self.values.get_mut(&key) {
+                Some(mut stored_data) => match &mut stored_data.value {
+                    DataType::Stream(stream_data) => {
+                        let last_value = stream_data.back();
                         val.valid_entry_id(last_value)?;
                         let id = val.id.clone();
-                        stored_steam_values.push_back(val);
+                        stream_data.push_back(val);
                         id
                     }
                     DataType::String(_) => panic!("previous stored value was a string"),
@@ -333,71 +335,52 @@ impl Database {
                     val.id = BulkString::encode(&key_id);
                     let id = val.id.clone();
                     v.push_back(val);
-                    self.value_map.insert(key.clone(), DataType::Stream(v));
+                    self.values.insert(
+                        key.clone(),
+                        DataValue {
+                            value: DataType::Stream(v),
+                            expiry: None,
+                        },
+                    );
                     id
                 }
             },
-        };
-        if let Some(config) = config {
-            self.expiry_map.insert(key.clone(), config);
         };
 
         Ok(val)
     }
 
-    pub fn keys(&self) -> String {
-        let keys: Vec<String> = self.value_map.keys().map(|x| x.decode()).collect();
-        format!("*{}\r\n{}\r\n", keys.len(), keys.join(""))
-    }
-
-    pub fn get(&mut self, key: &BulkString) -> String {
-        match (self.expiry_map.get(key), self.value_map.get(key)) {
-            (Some(config), Some(value)) => match config.has_expired() {
-                true => {
-                    println!("{key:?} value expired {config:?}");
-                    self.value_map.remove(key);
-                    self.expiry_map.remove(key);
-                    "$-1\r\n".to_owned()
-                }
-                false => match value {
-                    DataType::String(v) => v.decode(),
-                    DataType::Stream(_) => unimplemented!(),
-                },
-            },
-            (None, Some(value)) => match value {
-                DataType::String(v) => v.decode(),
-                DataType::Stream(_) => unimplemented!(),
-            },
-            (_config, _value) => {
-                dbg!(_config, _value);
-                "$-1\r\n".to_owned()
-            }
+    pub fn get(&self, key: &BulkString) -> String {
+        let Some(stored_val) = self.values.get(key) else {
+            return "$-1\r\n".to_owned();
+        };
+        let decoded_value = match &stored_val.value {
+            DataType::String(v) => v.decode(),
+            DataType::Stream(_) => unimplemented!(), // TODO: better error handling here
+        };
+        let has_expired = stored_val.expiry.clone().is_some_and(|e| e.has_expired());
+        if has_expired {
+            self.values.remove(key);
+            "$-1\r\n".to_owned()
+        } else {
+            decoded_value
         }
     }
 
-    pub fn ty(&mut self, key: &BulkString) -> String {
-        match (self.expiry_map.get(key), self.value_map.get(key)) {
-            (Some(config), Some(value)) => match config.has_expired() {
-                true => {
-                    println!("{key:?} value expired {config:?}");
-                    self.value_map.remove(key);
-                    self.expiry_map.remove(key);
-                    "+none\r\n".to_owned()
-                }
-                false => match value {
-                    DataType::String(_) => "+string\r\n".to_owned(),
-                    DataType::Stream(_) => "+stream\r\n".to_owned(),
-                },
-            },
-            (None, Some(value)) => match value {
-                DataType::String(_) => "+string\r\n".to_owned(),
-                DataType::Stream(_) => "+stream\r\n".to_owned(),
-            },
-
-            (_config, _value) => {
-                dbg!(_config, _value);
-                "+none\r\n".to_owned()
-            }
+    pub fn ty(&self, key: &BulkString) -> String {
+        let Some(stored_val) = self.values.get(key) else {
+            return "+none\r\n".to_owned();
+        };
+        let ty_value = match &stored_val.value {
+            DataType::String(_) => "+string\r\n".to_owned(),
+            DataType::Stream(_) => "+stream\r\n".to_owned(),
+        };
+        let has_expired = stored_val.expiry.clone().is_some_and(|e| e.has_expired());
+        if has_expired {
+            self.values.remove(key);
+            "+none\r\n".to_owned()
+        } else {
+            ty_value
         }
     }
 
@@ -435,8 +418,8 @@ impl Database {
         start: &BulkString,
         end: &BulkString,
     ) -> anyhow::Result<String> {
-        match self.value_map.get(key) {
-            Some(value) => value.xrange(start, end),
+        match self.values.get(key) {
+            Some(stored_value) => stored_value.value.xrange(start, end),
             None => anyhow::bail!("Stream value not set"),
         }
     }
@@ -448,10 +431,10 @@ impl Database {
         key_id_pairs
             .iter()
             .flat_map(|(key, start)| {
-                dbg!(&start.data);
                 let start = if start.data.as_str() == "$" {
-                    match self.value_map.get(key) {
+                    match self.values.get(key) {
                         Some(v) => v
+                            .value
                             .max_entry_timestamp()
                             .expect("Failed to find last entry time stamp"),
                         None => BulkString::encode("0-0"),
@@ -469,9 +452,9 @@ impl Database {
         let resp_values: Vec<String> = key_id_pairs
             .iter()
             .flat_map(|(key, start)| {
-                self.value_map
+                self.values
                     .get(key)
-                    .and_then(|v| v.xread(key, start).ok())
+                    .and_then(|v| v.value.xread(key, start).ok())
             })
             .collect();
 

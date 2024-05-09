@@ -1,15 +1,15 @@
 // RDB reader - some amount of code here is adopted and modified from https://github.com/badboy/rdb-rs/blob/master/src/parser.rs
 use std::{
-    collections::HashMap,
     io::{BufReader, Read},
     time::{Duration, UNIX_EPOCH},
 };
 
 use anyhow::Context;
 use bytes::{Buf, BytesMut};
+use dashmap::DashMap;
 
 use crate::{
-    db::{DataType, SetConfig},
+    db::{DataType, DataValue, SetConfig},
     resp::bulk_string::BulkString,
 };
 
@@ -68,8 +68,7 @@ impl<R: Read> Rdb<R> {
 
     pub fn read_rdb_to_map(
         &mut self,
-        value_map: &mut HashMap<BulkString, DataType>,
-        expiry_map: &mut HashMap<BulkString, SetConfig>,
+        values: &mut DashMap<BulkString, DataValue>,
     ) -> anyhow::Result<()> {
         self.read_header()?;
         loop {
@@ -95,8 +94,11 @@ impl<R: Read> Rdb<R> {
                     let key: BulkString = self.read_blob()?.into();
                     let value: BulkString = self.read_blob()?.into();
                     println!("Saved key {key:?} and value {value:?} and expiry {expiry}ms");
-                    expiry_map.insert(key.clone(), SetConfig::from_expiration(exp));
-                    value_map.insert(key, DataType::String(value));
+                    let data_value = DataValue {
+                        value: DataType::String(value),
+                        expiry: Some(SetConfig::from_expiration(exp)),
+                    };
+                    values.insert(key, data_value);
                 }
                 op_code::EXPIRETIME => {
                     self.buffer.resize(4, 0);
@@ -106,8 +108,11 @@ impl<R: Read> Rdb<R> {
                     let key: BulkString = self.read_blob()?.into();
                     let value: BulkString = self.read_blob()?.into();
                     println!("Saved key {key:?} and value {value:?} and expiry {expiry}s");
-                    expiry_map.insert(key.clone(), SetConfig::from_expiration(exp));
-                    value_map.insert(key, DataType::String(value));
+                    let data_value = DataValue {
+                        value: DataType::String(value),
+                        expiry: Some(SetConfig::from_expiration(exp)),
+                    };
+                    values.insert(key, data_value);
                 }
                 op_code::EOF => {
                     break;
@@ -116,7 +121,11 @@ impl<R: Read> Rdb<R> {
                     let key = self.read_blob()?;
                     let value = self.read_blob()?.into();
                     println!("Saved key {key:?} and value {value:?}");
-                    value_map.insert(key.into(), DataType::String(value));
+                    let data_value = DataValue {
+                        value: DataType::String(value),
+                        expiry: None,
+                    };
+                    values.insert(key.into(), data_value);
                 }
             }
         }
