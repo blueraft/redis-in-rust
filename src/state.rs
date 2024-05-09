@@ -60,7 +60,7 @@ impl ReplicaConfig {
 #[derive(Debug, Clone)]
 pub struct State {
     replica_config: Arc<Mutex<ReplicaConfig>>,
-    db: Arc<Mutex<Database>>,
+    db: Arc<Database>,
 }
 
 impl State {
@@ -81,7 +81,7 @@ impl State {
 
         Self {
             replica_config: Arc::new(Mutex::new(replica_config)),
-            db: Arc::new(Mutex::new(db)),
+            db: Arc::new(db),
         }
     }
 
@@ -160,7 +160,7 @@ impl State {
         &mut self,
         pairs: &[(BulkString, BulkString)],
     ) -> Vec<(BulkString, BulkString)> {
-        self.db.lock().unwrap().swap_and_fetch_max_id(pairs)
+        self.db.swap_and_fetch_max_id(pairs)
     }
 
     pub fn handle_response(&mut self, redis_data: &RedisData) -> anyhow::Result<String> {
@@ -186,7 +186,7 @@ impl State {
                 }
             },
             RedisData::Set(key, value, config) => {
-                self.db.lock().unwrap().set(
+                self.db.set(
                     key.to_owned(),
                     InputData::String(value.to_owned()),
                     Some(config.to_owned()),
@@ -195,7 +195,7 @@ impl State {
             }
 
             RedisData::Xadd(key, id, map) => {
-                let result = self.db.lock().unwrap().set(
+                let result = self.db.set(
                     key.to_owned(),
                     InputData::Stream(StreamData {
                         id: id.to_owned(),
@@ -208,16 +208,16 @@ impl State {
                     Err(e) => e.to_string(),
                 }
             }
-            RedisData::Xrange(key, start, end) => {
-                match self.db.lock().unwrap().xrange(key, start, end) {
-                    Ok(res) => res,
-                    Err(e) => panic!("Failed to retrieve values due to {e}"),
-                }
-            }
+            RedisData::Xrange(key, start, end) => match self.db.xrange(key, start, end) {
+                Ok(res) => res,
+                Err(e) => panic!("Failed to retrieve values due to {e}"),
+            },
             RedisData::Xread(_streams, key_id_pairs, _block_duration) => {
-                self.db.lock().unwrap().xread(key_id_pairs)
+                self.db.xread(key_id_pairs)
             }
-            RedisData::Keys(_value) => self.db.lock().unwrap().keys(),
+            RedisData::Keys(_value) => {
+                unimplemented!()
+            }
             RedisData::Psync(repl_id, _repl_offset) => match repl_id.data.as_str() {
                 "?" => {
                     let resp = format!(
@@ -237,13 +237,13 @@ impl State {
                     .load(Ordering::Relaxed);
                 format!(":{}\r\n", num_replica)
             }
-            RedisData::Get(key) => self.db.lock().unwrap().get(key),
-            RedisData::Type(key) => self.db.lock().unwrap().ty(key),
+            RedisData::Get(key) => self.db.get(key),
+            RedisData::Type(key) => self.db.ty(key),
             RedisData::Echo(data) => data.decode(),
             RedisData::Config(cmd, arg) => match cmd.data.to_lowercase().as_str() {
                 "get" => match arg.data.to_lowercase().as_str() {
-                    "dir" => self.db.lock().unwrap().dir()?,
-                    "dbfilename" => self.db.lock().unwrap().dbfilename()?,
+                    "dir" => self.db.dir()?,
+                    "dbfilename" => self.db.dbfilename()?,
                     arg => anyhow::bail!("invalid cmd {arg}"),
                 },
                 cmd => anyhow::bail!("invalid cmd {cmd}"),
