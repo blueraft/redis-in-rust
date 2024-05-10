@@ -442,7 +442,6 @@ impl Database {
                 } else {
                     start.to_owned()
                 };
-                dbg!(&key, &start);
                 Some((key.clone(), start))
             })
             .collect()
